@@ -86,7 +86,7 @@ $missingEnvVars = $requiredEnvVars | Where-Object {
 }
 
 if ($missingEnvVars.Count -gt 0) {
-    throw "Missing required realtime env vars in $localEnvPath: $($missingEnvVars -join ', ')"
+    throw "Missing required realtime env vars in ${localEnvPath}: $($missingEnvVars -join ', ')"
 }
 
 if (-not (Test-Path (Join-Path $backendDir ".venv\Scripts\python.exe"))) {
