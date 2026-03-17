@@ -1,0 +1,274 @@
+from __future__ import annotations
+
+import json
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from .logging_utils import configure_logging, get_logger
+from .schemas import AdminLoginRequest, AdminSessionStatus, ConfigBundle, MuseumConfig, PublicConfigResponse
+from .security import AdminSecurity
+from .session_manager import RealtimeSessionManager, SessionHandle
+from .settings import Settings
+from .store import ConfigStore
+
+logger = get_logger("main")
+
+
+@dataclass(slots=True)
+class ConnectionContext:
+    client_id: str | None = None
+    resume_token: str | None = None
+    session: SessionHandle | None = None
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or Settings.from_env()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        configure_logging(settings.log_file_path, settings.log_level)
+        app.state.settings = settings
+        app.state.security = AdminSecurity(settings)
+        app.state.store = ConfigStore(settings.database_path)
+        password_hash = app.state.security.hash_password(settings.admin_password)
+        app.state.store.initialize(settings.default_config, password_hash)
+        app.state.sessions = RealtimeSessionManager(settings, app.state.store)
+        logger.info(
+            "app_started upstream_mode=%s log_file=%s base_url=%s",
+            settings.upstream_mode,
+            settings.log_file_path,
+            settings.upstream_base_url,
+        )
+        yield
+
+    app = FastAPI(title=settings.app_name, lifespan=lifespan)
+
+    def get_security() -> AdminSecurity:
+        return app.state.security
+
+    def get_store() -> ConfigStore:
+        return app.state.store
+
+    def get_sessions() -> RealtimeSessionManager:
+        return app.state.sessions
+
+    @app.get("/api/health")
+    async def healthcheck() -> dict:
+        published = get_store().get_published()
+        return {
+            "ok": True,
+            "upstreamMode": settings.upstream_mode,
+            "configVersion": published.version,
+        }
+
+    @app.get("/api/public/config", response_model=PublicConfigResponse)
+    async def get_public_config() -> PublicConfigResponse:
+        published = get_store().get_published()
+        return PublicConfigResponse(version=published.version, config=published.config)
+
+    @app.get("/api/admin/session", response_model=AdminSessionStatus)
+    async def get_admin_session(request: Request) -> Response:
+        security = get_security()
+        csrf_token, should_set_cookie = security.get_or_create_csrf_token(request)
+        response = JSONResponse(
+            {
+                "authenticated": security.read_session(request) is not None,
+                "csrf_token": csrf_token,
+            }
+        )
+        if should_set_cookie:
+            security.set_csrf_cookie(response, csrf_token)
+        return response
+
+    @app.post("/api/admin/login", response_model=AdminSessionStatus)
+    async def admin_login(request: Request, payload: AdminLoginRequest) -> Response:
+        security = get_security()
+        security.validate_csrf(request)
+        ip_key = request.client.host if request.client else "local"
+        security.rate_limiter.ensure_allowed(ip_key)
+        stored_hash = get_store().get_admin_password_hash()
+        if not security.verify_password(stored_hash, payload.password):
+            security.rate_limiter.record_failure(ip_key)
+            raise HTTPException(status_code=401, detail="密码错误。")
+        csrf_token = request.cookies.get(settings.csrf_cookie_name, "")
+        response = JSONResponse(
+            {
+                "authenticated": True,
+                "csrf_token": csrf_token,
+            }
+        )
+        security.create_session(response)
+        security.rate_limiter.reset(ip_key)
+        return response
+
+    @app.post("/api/admin/logout")
+    async def admin_logout(request: Request) -> Response:
+        security = get_security()
+        security.validate_csrf(request)
+        response = JSONResponse({"ok": True})
+        security.clear_session(response)
+        return response
+
+    @app.get("/api/admin/config", response_model=ConfigBundle)
+    async def get_admin_config(request: Request) -> ConfigBundle:
+        get_security().require_admin(request)
+        store = get_store()
+        return ConfigBundle(draft=store.get_draft(), published=store.get_published())
+
+    @app.put("/api/admin/config")
+    async def update_draft_config(request: Request) -> dict:
+        security = get_security()
+        security.validate_csrf(request)
+        security.require_admin(request)
+        body = await request.json()
+        config = MuseumConfig.model_validate(body)
+        draft = get_store().save_draft(config, updated_by="admin")
+        return {"updatedAt": draft.updated_at.isoformat(), "ok": True}
+
+    @app.post("/api/admin/config/publish")
+    async def publish_config(request: Request) -> dict:
+        security = get_security()
+        security.validate_csrf(request)
+        security.require_admin(request)
+        published = get_store().publish_draft("admin")
+        return {
+            "version": published.version,
+            "publishedAt": published.timestamp.isoformat(),
+        }
+
+    @app.get("/api/admin/config/history")
+    async def config_history(request: Request) -> list[dict]:
+        get_security().require_admin(request)
+        items = get_store().list_published()
+        return [item.model_dump(mode="json") for item in items]
+
+    @app.post("/api/admin/session/reset")
+    async def reset_runtime_session(request: Request) -> dict:
+        security = get_security()
+        security.validate_csrf(request)
+        security.require_admin(request)
+        closed = await get_sessions().force_close_active("admin_reset")
+        return {"closed": closed}
+
+    @app.websocket("/api/realtime")
+    async def realtime_socket(websocket: WebSocket) -> None:
+        await websocket.accept()
+        context = ConnectionContext()
+        sessions = get_sessions()
+        logger.info("ws_connected client=%s", websocket.client)
+        try:
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    break
+                if message.get("text"):
+                    payload = json.loads(message["text"])
+                    msg_type = payload.get("type")
+                    logger.info(
+                        "ws_message type=%s client_id=%s session_id=%s",
+                        msg_type,
+                        context.client_id,
+                        context.session.session_id if context.session is not None else None,
+                    )
+                    if msg_type == "hello":
+                        context.client_id = payload.get("clientId")
+                        context.resume_token = payload.get("resumeToken")
+                    elif msg_type == "start_session":
+                        client_id = payload.get("clientId") or context.client_id
+                        if not client_id:
+                            await websocket.send_json({"type": "error", "message": "missing clientId"})
+                            continue
+                        context.client_id = client_id
+                        context.resume_token = payload.get("resumeToken") or context.resume_token
+                        try:
+                            context.session = await sessions.start_session(
+                                websocket,
+                                client_id=context.client_id,
+                                resume_token=context.resume_token,
+                            )
+                            context.resume_token = context.session.resume_token
+                            logger.info(
+                                "ws_session_started session_id=%s upstream_mode=%s",
+                                context.session.session_id,
+                                settings.upstream_mode,
+                            )
+                        except Exception as exc:
+                            logger.exception("ws_session_start_failed client_id=%s", context.client_id)
+                            await websocket.send_json(
+                                {
+                                    "type": "error",
+                                    "message": str(exc) or "开启对话失败，请检查实时服务配置。",
+                                }
+                            )
+                            context.session = None
+                    elif msg_type == "end_session":
+                        if context.session is not None:
+                            await sessions.close_session(context.session, payload.get("reason", "manual_end"))
+                            context.session = None
+                    elif msg_type == "heartbeat":
+                        if context.session is not None:
+                            await sessions.heartbeat(context.session)
+                    elif msg_type == "voice_activity":
+                        if context.session is not None:
+                            await sessions.record_voice_activity(
+                                context.session,
+                                speaking=bool(payload.get("speaking", False)),
+                                level=payload.get("level"),
+                            )
+                    elif msg_type == "interrupt" and context.session is not None:
+                        logger.info("ws_interrupt session_id=%s", context.session.session_id)
+                        get_store().log_session_event(
+                            context.session.session_id,
+                            context.session.client_id,
+                            context.session.config_version,
+                            "soft_interrupt",
+                            None,
+                        )
+                elif message.get("bytes") is not None and context.session is not None:
+                    logger.debug(
+                        "ws_audio_chunk session_id=%s bytes=%s",
+                        context.session.session_id,
+                        len(message["bytes"]),
+                    )
+                    await sessions.send_audio(context.session, message["bytes"])
+        except WebSocketDisconnect:
+            logger.info(
+                "ws_disconnected client_id=%s session_id=%s",
+                context.client_id,
+                context.session.session_id if context.session is not None else None,
+            )
+            pass
+        finally:
+            if context.session is not None:
+                await sessions.detach(context.session, websocket)
+
+    dist_dir = settings.frontend_dist_dir
+    if dist_dir.exists():
+        assets_dir = dist_dir / "assets"
+        if assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+        @app.get("/{full_path:path}")
+        async def frontend_files(full_path: str) -> Response:
+            candidate = dist_dir / full_path
+            if full_path and candidate.exists() and candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(dist_dir / "index.html")
+
+    else:
+        @app.get("/")
+        async def no_frontend() -> dict:
+            return {
+                "message": "frontend build not found",
+                "expectedPath": str(Path(dist_dir)),
+            }
+
+    return app
+
+
+app = create_app()
