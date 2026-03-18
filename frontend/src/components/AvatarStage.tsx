@@ -11,7 +11,7 @@ import {
 } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { driveAvatar, inspectAvatar } from "../avatar/adapter";
@@ -28,6 +28,32 @@ const stageEnvironmentFile = "/environments/rogland_clear_night_1k.hdr";
 const stageCoolAccent = "#78dcff";
 const stageWarmAccent = "#9fd7ff";
 const stageGlassAccent = "#8ad6ff";
+
+type StageVisualMode = "idle" | "engaged" | "narrating";
+
+function resolveStableStageVisualMode(
+  phase: VisitorPhase,
+  previousMode: StageVisualMode,
+): StageVisualMode {
+  switch (phase) {
+    case "boot":
+    case "idle":
+    case "error":
+      return "idle";
+    case "listening":
+    case "user_speaking":
+    case "thinking":
+      return "engaged";
+    case "speaking":
+      return "narrating";
+    case "opening_session":
+    case "greeting":
+    case "interrupted":
+    case "closing_session":
+    default:
+      return previousMode;
+  }
+}
 
 function resolveMotionPhase(phase: VisitorPhase): VisitorPhase {
   if (phase === "user_speaking") {
@@ -275,7 +301,7 @@ function LoadedAvatar({
   );
 }
 
-function StageEnvironment({ accent, warmAccent }: { accent: string; warmAccent: string }) {
+const StaticStageEnvironment = memo(function StaticStageEnvironment() {
   return (
     <Environment
       files={stageEnvironmentFile}
@@ -286,7 +312,7 @@ function StageEnvironment({ accent, warmAccent }: { accent: string; warmAccent: 
     >
       <Lightformer
         form="ring"
-        color={accent}
+        color={stageCoolAccent}
         intensity={0.7}
         scale={2.1}
         position={[0, 1.45, -5.6]}
@@ -310,7 +336,7 @@ function StageEnvironment({ accent, warmAccent }: { accent: string; warmAccent: 
       />
       <Lightformer
         form="rect"
-        color={warmAccent}
+        color={stageWarmAccent}
         intensity={0.34}
         scale={[2.4, 0.5, 1]}
         position={[0, 2.9, -3.6]}
@@ -318,7 +344,7 @@ function StageEnvironment({ accent, warmAccent }: { accent: string; warmAccent: 
       />
     </Environment>
   );
-}
+});
 
 function useRadialGlowTexture() {
   const texture = useMemo(() => {
@@ -467,6 +493,64 @@ function ParallaxStarLayer({
   );
 }
 
+interface ReactiveStageTargets {
+  leftSpotIntensity: number;
+  rightSpotIntensity: number;
+  footLightIntensity: number;
+  topFrameEmissive: number;
+  baseFrameEmissive: number;
+  pillarEmissive: number;
+  accentOpacity: number;
+  glassOpacity: number;
+  floorAccentOpacity: number;
+  ringOpacity: number;
+}
+
+function getReactiveStageTargets(mode: StageVisualMode): ReactiveStageTargets {
+  switch (mode) {
+    case "engaged":
+      return {
+        leftSpotIntensity: 5.2,
+        rightSpotIntensity: 4.1,
+        footLightIntensity: 2.9,
+        topFrameEmissive: 0.46,
+        baseFrameEmissive: 0.38,
+        pillarEmissive: 0.46,
+        accentOpacity: 0.78,
+        glassOpacity: 0.62,
+        floorAccentOpacity: 0.46,
+        ringOpacity: 0.38,
+      };
+    case "narrating":
+      return {
+        leftSpotIntensity: 6.1,
+        rightSpotIntensity: 4.9,
+        footLightIntensity: 3.35,
+        topFrameEmissive: 0.56,
+        baseFrameEmissive: 0.44,
+        pillarEmissive: 0.54,
+        accentOpacity: 0.88,
+        glassOpacity: 0.72,
+        floorAccentOpacity: 0.56,
+        ringOpacity: 0.48,
+      };
+    case "idle":
+    default:
+      return {
+        leftSpotIntensity: 4.2,
+        rightSpotIntensity: 3.4,
+        footLightIntensity: 2.4,
+        topFrameEmissive: 0.38,
+        baseFrameEmissive: 0.32,
+        pillarEmissive: 0.4,
+        accentOpacity: 0.62,
+        glassOpacity: 0.5,
+        floorAccentOpacity: 0.34,
+        ringOpacity: 0.28,
+      };
+  }
+}
+
 function ObservationConsole({ side, accent, floorY }: { side: -1 | 1; accent: string; floorY: number }) {
   return (
     <group position={[side * 4.82, floorY + 0.78, -2.76]} rotation={[0, -side * 0.68, 0]} scale={0.76}>
@@ -498,9 +582,7 @@ function ObservationConsole({ side, accent, floorY }: { side: -1 | 1; accent: st
   );
 }
 
-function ObservationWindowBackdrop({ floorY }: { floorY: number }) {
-  const accent = stageCoolAccent;
-  const glassAccent = stageGlassAccent;
+const StaticCosmosBackdrop = memo(function StaticCosmosBackdrop({ floorY }: { floorY: number }) {
   const windowCenterY = floorY + 1.16;
 
   return (
@@ -551,7 +633,7 @@ function ObservationWindowBackdrop({ floorY }: { floorY: number }) {
         center={[-0.2, windowCenterY + 0.2, -8.55]}
         span={[6.2, 2.9, 0.62]}
         count={72}
-        color={glassAccent}
+        color={stageGlassAccent}
         size={0.17}
         opacity={0.98}
         drift={0.18}
@@ -568,8 +650,8 @@ function ObservationWindowBackdrop({ floorY }: { floorY: number }) {
         twinkle={0.72}
       />
       <Stars radius={44} depth={12} count={680} factor={2.08} saturation={0.05} fade speed={0.1} />
-      <Sparkles count={30} scale={[10.8, 5.1, 9]} size={2.38} speed={0.12} color={accent} />
-      <Sparkles count={12} scale={[9.1, 3.8, 7]} size={3.35} speed={0.08} color={glassAccent} />
+      <Sparkles count={30} scale={[10.8, 5.1, 9]} size={2.38} speed={0.12} color={stageCoolAccent} />
+      <Sparkles count={12} scale={[9.1, 3.8, 7]} size={3.35} speed={0.08} color={stageGlassAccent} />
 
       <Cloud
         position={[0.24, windowCenterY + 0.26, -10.35]}
@@ -612,43 +694,203 @@ function ObservationWindowBackdrop({ floorY }: { floorY: number }) {
         <planeGeometry args={[6.2, 3.16]} />
         <meshPhysicalMaterial color="#4db7e0" roughness={0.08} metalness={0.1} transparent opacity={0.07} />
       </mesh>
+    </group>
+  );
+});
+
+const ReactiveStageLayer = memo(function ReactiveStageLayer({
+  floorY,
+  mode,
+}: {
+  floorY: number;
+  mode: StageVisualMode;
+}) {
+  const windowCenterY = floorY + 1.16;
+  const leftSpotRef = useRef<THREE.SpotLight>(null);
+  const rightSpotRef = useRef<THREE.SpotLight>(null);
+  const footLightRef = useRef<THREE.PointLight>(null);
+  const topFrameMaterialRef = useRef<THREE.MeshStandardMaterial>(null);
+  const baseFrameMaterialRef = useRef<THREE.MeshStandardMaterial>(null);
+  const leftPillarMaterialRef = useRef<THREE.MeshStandardMaterial>(null);
+  const rightPillarMaterialRef = useRef<THREE.MeshStandardMaterial>(null);
+  const leftAccentMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
+  const rightAccentMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
+  const topGlassMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
+  const floorAccentMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
+  const ringMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
+  const currentTargetsRef = useRef(getReactiveStageTargets(mode));
+  const targetTargetsRef = useRef(getReactiveStageTargets(mode));
+
+  useEffect(() => {
+    targetTargetsRef.current = getReactiveStageTargets(mode);
+  }, [mode]);
+
+  useFrame((_, delta) => {
+    const current = currentTargetsRef.current;
+    const target = targetTargetsRef.current;
+    const damping = 1 - Math.exp(-delta * 4.6);
+
+    current.leftSpotIntensity = THREE.MathUtils.lerp(current.leftSpotIntensity, target.leftSpotIntensity, damping);
+    current.rightSpotIntensity = THREE.MathUtils.lerp(current.rightSpotIntensity, target.rightSpotIntensity, damping);
+    current.footLightIntensity = THREE.MathUtils.lerp(current.footLightIntensity, target.footLightIntensity, damping);
+    current.topFrameEmissive = THREE.MathUtils.lerp(current.topFrameEmissive, target.topFrameEmissive, damping);
+    current.baseFrameEmissive = THREE.MathUtils.lerp(current.baseFrameEmissive, target.baseFrameEmissive, damping);
+    current.pillarEmissive = THREE.MathUtils.lerp(current.pillarEmissive, target.pillarEmissive, damping);
+    current.accentOpacity = THREE.MathUtils.lerp(current.accentOpacity, target.accentOpacity, damping);
+    current.glassOpacity = THREE.MathUtils.lerp(current.glassOpacity, target.glassOpacity, damping);
+    current.floorAccentOpacity = THREE.MathUtils.lerp(current.floorAccentOpacity, target.floorAccentOpacity, damping);
+    current.ringOpacity = THREE.MathUtils.lerp(current.ringOpacity, target.ringOpacity, damping);
+
+    if (leftSpotRef.current) {
+      leftSpotRef.current.intensity = current.leftSpotIntensity;
+    }
+    if (rightSpotRef.current) {
+      rightSpotRef.current.intensity = current.rightSpotIntensity;
+    }
+    if (footLightRef.current) {
+      footLightRef.current.intensity = current.footLightIntensity;
+    }
+    if (topFrameMaterialRef.current) {
+      topFrameMaterialRef.current.emissiveIntensity = current.topFrameEmissive;
+    }
+    if (baseFrameMaterialRef.current) {
+      baseFrameMaterialRef.current.emissiveIntensity = current.baseFrameEmissive;
+    }
+    if (leftPillarMaterialRef.current) {
+      leftPillarMaterialRef.current.emissiveIntensity = current.pillarEmissive;
+    }
+    if (rightPillarMaterialRef.current) {
+      rightPillarMaterialRef.current.emissiveIntensity = current.pillarEmissive;
+    }
+    if (leftAccentMaterialRef.current) {
+      leftAccentMaterialRef.current.opacity = current.accentOpacity;
+    }
+    if (rightAccentMaterialRef.current) {
+      rightAccentMaterialRef.current.opacity = current.accentOpacity;
+    }
+    if (topGlassMaterialRef.current) {
+      topGlassMaterialRef.current.opacity = current.glassOpacity;
+    }
+    if (floorAccentMaterialRef.current) {
+      floorAccentMaterialRef.current.opacity = current.floorAccentOpacity;
+    }
+    if (ringMaterialRef.current) {
+      ringMaterialRef.current.opacity = current.ringOpacity;
+    }
+  });
+
+  const initialTargets = currentTargetsRef.current;
+
+  return (
+    <>
+      <spotLight
+        ref={leftSpotRef}
+        position={[-2.8, 2.8, 1.9]}
+        intensity={initialTargets.leftSpotIntensity}
+        angle={0.42}
+        penumbra={0.95}
+        color={stageCoolAccent}
+      />
+      <spotLight
+        ref={rightSpotRef}
+        position={[2.8, 2.4, 1.5]}
+        intensity={initialTargets.rightSpotIntensity}
+        angle={0.44}
+        penumbra={0.98}
+        color={stageWarmAccent}
+      />
+      <pointLight
+        ref={footLightRef}
+        position={[0, 0.55, 1.3]}
+        intensity={initialTargets.footLightIntensity}
+        distance={6.2}
+        color="#6cc4ff"
+      />
 
       <mesh position={[0, windowCenterY + 1.62, -5.95]} castShadow>
         <boxGeometry args={[7.24, 0.3, 0.52]} />
-        <meshStandardMaterial color="#09111f" metalness={0.74} roughness={0.24} emissive="#13233a" emissiveIntensity={0.42} />
+        <meshStandardMaterial
+          ref={topFrameMaterialRef}
+          color="#09111f"
+          metalness={0.74}
+          roughness={0.24}
+          emissive="#13233a"
+          emissiveIntensity={initialTargets.topFrameEmissive}
+        />
       </mesh>
       <mesh position={[0, floorY + 0.08, -5.5]} castShadow>
         <boxGeometry args={[7.6, 0.42, 0.9]} />
-        <meshStandardMaterial color="#0a1321" metalness={0.72} roughness={0.22} emissive="#0c1c31" emissiveIntensity={0.34} />
+        <meshStandardMaterial
+          ref={baseFrameMaterialRef}
+          color="#0a1321"
+          metalness={0.72}
+          roughness={0.22}
+          emissive="#0c1c31"
+          emissiveIntensity={initialTargets.baseFrameEmissive}
+        />
       </mesh>
       <mesh position={[-3.48, windowCenterY, -5.8]} castShadow>
         <boxGeometry args={[0.34, 3.48, 0.48]} />
-        <meshStandardMaterial color="#0b1322" metalness={0.68} roughness={0.28} emissive="#102034" emissiveIntensity={0.42} />
+        <meshStandardMaterial
+          ref={leftPillarMaterialRef}
+          color="#0b1322"
+          metalness={0.68}
+          roughness={0.28}
+          emissive="#102034"
+          emissiveIntensity={initialTargets.pillarEmissive}
+        />
       </mesh>
       <mesh position={[3.48, windowCenterY, -5.8]} castShadow>
         <boxGeometry args={[0.34, 3.48, 0.48]} />
-        <meshStandardMaterial color="#0b1322" metalness={0.68} roughness={0.28} emissive="#102034" emissiveIntensity={0.42} />
+        <meshStandardMaterial
+          ref={rightPillarMaterialRef}
+          color="#0b1322"
+          metalness={0.68}
+          roughness={0.28}
+          emissive="#102034"
+          emissiveIntensity={initialTargets.pillarEmissive}
+        />
       </mesh>
 
       <mesh position={[-3.08, windowCenterY + 0.02, -5.48]}>
         <boxGeometry args={[0.08, 2.74, 0.06]} />
-        <meshBasicMaterial color={accent} transparent opacity={0.72} />
+        <meshBasicMaterial
+          ref={leftAccentMaterialRef}
+          color={stageCoolAccent}
+          transparent
+          opacity={initialTargets.accentOpacity}
+        />
       </mesh>
       <mesh position={[3.08, windowCenterY + 0.02, -5.48]}>
         <boxGeometry args={[0.08, 2.74, 0.06]} />
-        <meshBasicMaterial color={accent} transparent opacity={0.72} />
+        <meshBasicMaterial
+          ref={rightAccentMaterialRef}
+          color={stageCoolAccent}
+          transparent
+          opacity={initialTargets.accentOpacity}
+        />
       </mesh>
       <mesh position={[0, windowCenterY + 1.32, -5.44]}>
         <boxGeometry args={[5.72, 0.08, 0.04]} />
-        <meshBasicMaterial color={glassAccent} transparent opacity={0.54} />
+        <meshBasicMaterial
+          ref={topGlassMaterialRef}
+          color={stageGlassAccent}
+          transparent
+          opacity={initialTargets.glassOpacity}
+        />
       </mesh>
       <mesh position={[0, floorY + 0.33, -5.42]}>
         <boxGeometry args={[5.66, 0.06, 0.04]} />
-        <meshBasicMaterial color={accent} transparent opacity={0.38} />
+        <meshBasicMaterial
+          ref={floorAccentMaterialRef}
+          color={stageCoolAccent}
+          transparent
+          opacity={initialTargets.floorAccentOpacity}
+        />
       </mesh>
 
-      <ObservationConsole side={-1} accent={accent} floorY={floorY} />
-      <ObservationConsole side={1} accent={accent} floorY={floorY} />
+      <ObservationConsole side={-1} accent={stageCoolAccent} floorY={floorY} />
+      <ObservationConsole side={1} accent={stageCoolAccent} floorY={floorY} />
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, floorY, -0.02]} receiveShadow>
         <circleGeometry args={[3.12, 72]} />
@@ -670,13 +912,18 @@ function ObservationWindowBackdrop({ floorY }: { floorY: number }) {
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, floorY + 0.012, 0.02]}>
         <ringGeometry args={[0.88, 1.7, 72]} />
-        <meshBasicMaterial color={accent} transparent opacity={0.45} />
+        <meshBasicMaterial
+          ref={ringMaterialRef}
+          color={stageCoolAccent}
+          transparent
+          opacity={initialTargets.ringOpacity}
+        />
       </mesh>
-    </group>
+    </>
   );
-}
+});
 
-function ScenePostFx() {
+const ScenePostFx = memo(function ScenePostFx() {
   return (
     <EffectComposer>
       <Bloom mipmapBlur intensity={0.72} luminanceThreshold={0.12} luminanceSmoothing={0.42} />
@@ -684,9 +931,9 @@ function ScenePostFx() {
       <Vignette eskil={false} offset={0.16} darkness={0.88} />
     </EffectComposer>
   );
-}
+});
 
-function CameraRig({ target }: { target: [number, number, number] }) {
+const CameraRig = memo(function CameraRig({ target }: { target: [number, number, number] }) {
   const { camera } = useThree();
   const targetVector = useMemo(() => new THREE.Vector3(...target), [target]);
 
@@ -700,12 +947,55 @@ function CameraRig({ target }: { target: [number, number, number] }) {
   });
 
   return null;
+});
+
+function AvatarActor({
+  avatarUrl,
+  level,
+  phase,
+  preset,
+}: {
+  avatarUrl?: string | null;
+  level: number;
+  phase: VisitorPhase;
+  preset: AvatarPreset;
+}) {
+  return (
+    <Suspense fallback={<FallbackAvatar level={level} phase={phase} />}>
+      {avatarUrl ? (
+        <LoadedAvatar avatarUrl={avatarUrl} level={level} phase={phase} preset={preset} />
+      ) : (
+        <FallbackAvatar level={level} phase={phase} />
+      )}
+    </Suspense>
+  );
 }
 
-export function AvatarStage({ avatarUrl, level, phase }: AvatarStageProps) {
-  const accent = stageCoolAccent;
-  const warmAccent = stageWarmAccent;
+function useStableStageVisualMode(phase: VisitorPhase): StageVisualMode {
+  const [visualMode, setVisualMode] = useState<StageVisualMode>(() =>
+    resolveStableStageVisualMode(phase, "idle"),
+  );
+  const stableModeRef = useRef<StageVisualMode>(visualMode);
+
+  useEffect(() => {
+    const nextMode = resolveStableStageVisualMode(phase, stableModeRef.current);
+    if (nextMode === stableModeRef.current) {
+      return;
+    }
+    stableModeRef.current = nextMode;
+    setVisualMode(nextMode);
+  }, [phase]);
+
+  return visualMode;
+}
+
+export const AvatarStage = memo(function AvatarStage({
+  avatarUrl,
+  level,
+  phase,
+}: AvatarStageProps) {
   const preset = useMemo(() => resolveAvatarPreset(avatarUrl), [avatarUrl]);
+  const stageVisualMode = useStableStageVisualMode(phase);
 
   useEffect(() => {
     if (avatarUrl) {
@@ -739,20 +1029,12 @@ export function AvatarStage({ avatarUrl, level, phase }: AvatarStageProps) {
         <hemisphereLight intensity={0.56} groundColor="#010409" color="#b4e3ff" />
         <directionalLight position={[0.3, 3.8, 3.5]} intensity={1.6} castShadow color="#eef6ff" />
         <spotLight position={[0, 4.8, 2.2]} intensity={24} angle={0.36} penumbra={0.92} color="#f1f8ff" />
-        <spotLight position={[-2.8, 2.8, 1.9]} intensity={6.4} angle={0.42} penumbra={0.95} color={accent} />
-        <spotLight position={[2.8, 2.4, 1.5]} intensity={4.8} angle={0.44} penumbra={0.98} color={warmAccent} />
-        <pointLight position={[0, 0.55, 1.3]} intensity={2.8} distance={6.2} color="#6cc4ff" />
         <Suspense fallback={null}>
-          <StageEnvironment accent={accent} warmAccent={warmAccent} />
+          <StaticStageEnvironment />
         </Suspense>
-        <ObservationWindowBackdrop floorY={preset.floorY} />
-        <Suspense fallback={<FallbackAvatar level={level} phase={phase} />}>
-          {avatarUrl ? (
-            <LoadedAvatar avatarUrl={avatarUrl} level={level} phase={phase} preset={preset} />
-          ) : (
-            <FallbackAvatar level={level} phase={phase} />
-          )}
-        </Suspense>
+        <StaticCosmosBackdrop floorY={preset.floorY} />
+        <ReactiveStageLayer floorY={preset.floorY} mode={stageVisualMode} />
+        <AvatarActor avatarUrl={avatarUrl} level={level} phase={phase} preset={preset} />
         <ContactShadows
           position={[0, preset.floorY + 0.02, 0.05]}
           opacity={preset.shadowOpacity}
@@ -764,4 +1046,4 @@ export function AvatarStage({ avatarUrl, level, phase }: AvatarStageProps) {
       </Canvas>
     </div>
   );
-}
+});
