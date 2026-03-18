@@ -37,6 +37,8 @@ class SessionHandle:
     detach_task: asyncio.Task | None = None
     greeting_active: bool = True
     first_tts_seen: bool = False
+    assistant_reply_id: str | None = None
+    assistant_text_buffer: str = ""
 
 
 class RealtimeSessionManager:
@@ -314,14 +316,33 @@ class RealtimeSessionManager:
 
         if event_code == 550:
             content = payload.get("content", "") if isinstance(payload, dict) else ""
+            reply_id = payload.get("reply_id") if isinstance(payload, dict) else None
+            if reply_id != handle.assistant_reply_id:
+                handle.assistant_reply_id = reply_id if isinstance(reply_id, str) else None
+                handle.assistant_text_buffer = ""
+
+            if isinstance(content, str) and content:
+                handle.assistant_text_buffer += content
+
+            if not handle.assistant_text_buffer:
+                return
+
             self.store.log_session_event(
                 handle.session_id,
                 handle.client_id,
                 handle.config_version,
                 "assistant_text",
-                {"content": content},
+                {"content": handle.assistant_text_buffer, "reply_id": handle.assistant_reply_id},
             )
-            await self._send_json(handle, {"type": "assistant_text", "text": content})
+            logger.info("Sending assistant_text to frontend: buffer=%s", handle.assistant_text_buffer)
+            await self._send_json(
+                handle,
+                {
+                    "type": "assistant_text",
+                    "text": handle.assistant_text_buffer,
+                    "replyId": handle.assistant_reply_id,
+                },
+            )
             return
 
         if event_code == 352:

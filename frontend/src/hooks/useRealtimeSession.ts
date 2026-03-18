@@ -5,13 +5,14 @@ import type { MuseumConfig, VisitorPhase } from "../types/api";
 interface SessionViewState {
   phase: VisitorPhase;
   assistantText: string;
+  assistantReplyId: string | null;
   userText: string;
   error: string | null;
 }
 
 type SessionAction =
   | { type: "phase"; phase: VisitorPhase }
-  | { type: "assistant"; text: string }
+  | { type: "assistant"; text: string; replyId: string | null }
   | { type: "user"; text: string }
   | { type: "error"; message: string }
   | { type: "reset" };
@@ -19,6 +20,7 @@ type SessionAction =
 const initialState: SessionViewState = {
   phase: "idle",
   assistantText: "",
+  assistantReplyId: null,
   userText: "",
   error: null,
 };
@@ -41,6 +43,7 @@ function reducer(state: SessionViewState, action: SessionAction): SessionViewSta
       return {
         ...state,
         assistantText: action.text,
+        assistantReplyId: action.replyId,
       };
     case "user":
       return {
@@ -112,6 +115,8 @@ export function useRealtimeSession(config: MuseumConfig | null) {
   const playerStartedRef = useRef(false);
   const playerStartedAtRef = useRef<number | null>(null);
   const interruptUnlockAtRef = useRef(0);
+  const ttsEndedRef = useRef(false);
+  const lastQueuedMsRef = useRef(0);
   const stableSpeechFramesRef = useRef(0);
   const lastVoiceActivitySentAtRef = useRef(0);
   const lastVoiceActivitySpeakingRef = useRef(false);
@@ -165,6 +170,8 @@ export function useRealtimeSession(config: MuseumConfig | null) {
     playerStartedRef.current = false;
     playerStartedAtRef.current = null;
     interruptUnlockAtRef.current = 0;
+    ttsEndedRef.current = false;
+    lastQueuedMsRef.current = 0;
     resetLocalSpeechGate();
     setAssistantLevel(0);
 
@@ -191,8 +198,27 @@ export function useRealtimeSession(config: MuseumConfig | null) {
   });
 
   const handlePlaybackEvent = useEffectEvent((event: PlaybackEvent) => {
-    if (event.type === "queue_depth" && event.queuedMs && event.queuedMs > 0 && binaryChunkCountRef.current === 1) {
-      pushTrace("tts:queue_depth", { queuedMs: event.queuedMs });
+    if (event.type === "queue_depth") {
+      const queuedMs = event.queuedMs ?? 0;
+      lastQueuedMsRef.current = queuedMs;
+
+      if (queuedMs > 0 && binaryChunkCountRef.current === 1) {
+        pushTrace("tts:queue_depth", { queuedMs });
+      }
+
+      if (queuedMs === 0 && ttsEndedRef.current) {
+        ttsEndedRef.current = false;
+        suppressIncomingAudioRef.current = false;
+        playerStartedRef.current = false;
+        playerStartedAtRef.current = null;
+        interruptUnlockAtRef.current = 0;
+        resetLocalSpeechGate();
+        setAssistantLevel(0);
+        pushTrace("tts:drained");
+        if (phaseRef.current !== "user_speaking") {
+          setPhase("listening");
+        }
+      }
       return;
     }
     if (event.type === "player_started" && !playerStartedRef.current) {
@@ -234,12 +260,14 @@ export function useRealtimeSession(config: MuseumConfig | null) {
 
     pushTrace("start:click");
     dispatch({ type: "phase", phase: "opening_session" });
-    dispatch({ type: "assistant", text: "" });
+    dispatch({ type: "assistant", text: "", replyId: null });
     dispatch({ type: "user", text: "" });
     binaryChunkCountRef.current = 0;
     playerStartedRef.current = false;
     playerStartedAtRef.current = null;
     interruptUnlockAtRef.current = 0;
+    ttsEndedRef.current = false;
+    lastQueuedMsRef.current = 0;
     suppressIncomingAudioRef.current = false;
     expectedSocketCloseRef.current = false;
     resetLocalSpeechGate();
@@ -347,30 +375,45 @@ export function useRealtimeSession(config: MuseumConfig | null) {
           if (type === "state_changed") {
             const nextState = payload.state;
             if (typeof nextState === "string") {
+              const shouldHoldListeningForDrain =
+                nextState === "listening" &&
+                (playerStartedRef.current || lastQueuedMsRef.current > 0 || ttsEndedRef.current);
+
               if (nextState === "speaking") {
+                ttsEndedRef.current = false;
+                lastQueuedMsRef.current = 0;
                 suppressIncomingAudioRef.current = false;
                 playerStartedRef.current = false;
                 playerStartedAtRef.current = null;
                 interruptUnlockAtRef.current = 0;
                 audioRef.current?.resetPlayerGain();
               }
+              if (nextState === "greeting") {
+                ttsEndedRef.current = false;
+                lastQueuedMsRef.current = 0;
+              }
               if (nextState === "listening") {
                 setAssistantLevel(0);
                 playerStartedRef.current = false;
                 playerStartedAtRef.current = null;
                 interruptUnlockAtRef.current = 0;
+                ttsEndedRef.current = false;
+                lastQueuedMsRef.current = 0;
                 resetLocalSpeechGate();
               }
               pushTrace("session:state_changed", { state: nextState });
-              setPhase(nextState as VisitorPhase);
+              if (!shouldHoldListeningForDrain) {
+                setPhase(nextState as VisitorPhase);
+              }
             }
             return;
           }
 
           if (type === "assistant_text" && typeof payload.text === "string") {
             const text = payload.text;
+            const replyId = typeof payload.replyId === "string" ? payload.replyId : null;
             startTransition(() => {
-              dispatch({ type: "assistant", text });
+              dispatch({ type: "assistant", text, replyId });
             });
             return;
           }
@@ -390,6 +433,8 @@ export function useRealtimeSession(config: MuseumConfig | null) {
             playerStartedRef.current = false;
             playerStartedAtRef.current = null;
             interruptUnlockAtRef.current = 0;
+            ttsEndedRef.current = false;
+            lastQueuedMsRef.current = 0;
             resetLocalSpeechGate();
             setAssistantLevel(0);
             setPhase("listening");
@@ -398,14 +443,18 @@ export function useRealtimeSession(config: MuseumConfig | null) {
 
           if (type === "tts_end") {
             pushTrace("tts:end", { phase: payload.phase });
-            suppressIncomingAudioRef.current = false;
-            playerStartedRef.current = false;
-            playerStartedAtRef.current = null;
-            interruptUnlockAtRef.current = 0;
-            resetLocalSpeechGate();
-            setAssistantLevel(0);
-            if (phaseRef.current !== "user_speaking") {
-              setPhase("listening");
+            ttsEndedRef.current = true;
+            if (lastQueuedMsRef.current <= 0) {
+              ttsEndedRef.current = false;
+              suppressIncomingAudioRef.current = false;
+              playerStartedRef.current = false;
+              playerStartedAtRef.current = null;
+              interruptUnlockAtRef.current = 0;
+              resetLocalSpeechGate();
+              setAssistantLevel(0);
+              if (phaseRef.current !== "user_speaking") {
+                setPhase("listening");
+              }
             }
             return;
           }
@@ -509,6 +558,7 @@ export function useRealtimeSession(config: MuseumConfig | null) {
   return {
     phase: state.phase,
     assistantText: state.assistantText,
+    assistantReplyId: state.assistantReplyId,
     userText: state.userText,
     error: state.error,
     assistantLevel,

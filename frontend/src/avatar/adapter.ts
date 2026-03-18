@@ -86,10 +86,10 @@ export function driveAvatar(bindings: AvatarBindings, level: number, elapsed: nu
   }
 
   if (bindings.jawBone) {
-    bindings.jawBone.rotation.x = level * 0.18;
+    bindings.jawBone.rotation.x = level * 0.15;
   }
   if (bindings.headBone) {
-    bindings.headBone.rotation.y = Math.sin(elapsed * 0.45) * 0.028;
-    bindings.headBone.rotation.x = Math.sin(elapsed * 0.3) * 0.014;
+    bindings.headBone.rotation.y = Math.sin(elapsed * 0.28) * 0.008;
+    bindings.headBone.rotation.x = Math.sin(elapsed * 0.22) * 0.005;
   }
 }

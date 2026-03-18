@@ -15,6 +15,13 @@ from .protocol import build_audio_frame, build_json_frame, parse_response
 logger = get_logger("upstream")
 
 
+def chunk_text(text: str, chunk_size: int = 6) -> list[str]:
+    cleaned = text.strip()
+    if not cleaned:
+        return []
+    return [cleaned[index : index + chunk_size] for index in range(0, len(cleaned), chunk_size)]
+
+
 @dataclass(slots=True)
 class UpstreamEvent:
     event: int | None
@@ -42,16 +49,27 @@ class MockRealtimeClient:
             )
         )
 
-    async def say_hello(self, text: str) -> None:
-        logger.info("upstream_say_hello mode=mock text_len=%s", len(text))
+    async def _stream_text(self, text: str, reply_id: str) -> None:
         await self.queue.put(
             UpstreamEvent(
                 event=550,
                 message_type="SERVER_FULL_RESPONSE",
-                payload={"content": text},
+                payload={"content": "", "reply_id": reply_id},
             )
         )
-        await asyncio.sleep(0.05)
+        for chunk in chunk_text(text):
+            await self.queue.put(
+                UpstreamEvent(
+                    event=550,
+                    message_type="SERVER_FULL_RESPONSE",
+                    payload={"content": chunk, "reply_id": reply_id},
+                )
+            )
+            await asyncio.sleep(0.02)
+
+    async def say_hello(self, text: str) -> None:
+        logger.info("upstream_say_hello mode=mock text_len=%s", len(text))
+        await self._stream_text(text, "mock-welcome")
         await self.queue.put(UpstreamEvent(event=359, message_type="SERVER_FULL_RESPONSE", payload={}))
 
     async def send_audio(self, _: bytes) -> None:
@@ -71,12 +89,9 @@ class MockRealtimeClient:
         await asyncio.sleep(0.05)
         await self.queue.put(UpstreamEvent(event=459, message_type="SERVER_FULL_RESPONSE", payload={}))
         await asyncio.sleep(0.15)
-        await self.queue.put(
-            UpstreamEvent(
-                event=550,
-                message_type="SERVER_FULL_RESPONSE",
-                payload={"content": "当前运行在模拟模式。配置好上游密钥后，这里会切换成真实实时语音。"},
-            )
+        await self._stream_text(
+            "当前运行在模拟模式。配置好上游密钥后，这里会切换成真实实时语音。",
+            str(uuid.uuid4()),
         )
         await asyncio.sleep(0.05)
         await self.queue.put(UpstreamEvent(event=352, message_type="SERVER_ACK", payload=b"\x00" * 960))

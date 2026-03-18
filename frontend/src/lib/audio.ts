@@ -3,7 +3,6 @@ export interface AudioRuntime {
   stream: MediaStream;
   source: MediaStreamAudioSourceNode;
   captureNode: AudioWorkletNode;
-  playerNode: AudioWorkletNode;
   close: () => Promise<void>;
   enqueueTtsChunk: (chunk: ArrayBuffer) => void;
   softInterrupt: () => void;
@@ -71,13 +70,18 @@ export async function createAudioRuntime(callbacks: CaptureCallbacks): Promise<A
 
   const context = new AudioContext();
   await context.audioWorklet.addModule("/audio/capture-worklet.js");
-  await context.audioWorklet.addModule("/audio/player-worklet.js");
 
   const source = context.createMediaStreamSource(stream);
   const captureNode = new AudioWorkletNode(context, "capture-processor");
-  const playerNode = new AudioWorkletNode(context, "player-processor", {
-    outputChannelCount: [1],
-  });
+  const playerGainNode = context.createGain();
+  playerGainNode.gain.value = 1;
+  playerGainNode.connect(context.destination);
+  const activeSources = new Set<AudioBufferSourceNode>();
+  const sourceEndTimes = new Map<AudioBufferSourceNode, number>();
+  const playbackLeadTimeSec = 0.12;
+  let bufferedUntil = context.currentTime;
+  let startTimer: number | null = null;
+  let didReportStart = false;
 
   captureNode.port.onmessage = (event: MessageEvent) => {
     const payload = event.data;
@@ -87,34 +91,60 @@ export async function createAudioRuntime(callbacks: CaptureCallbacks): Promise<A
       callbacks.onVad(payload.level as number, payload.speaking as boolean);
     }
   };
-  playerNode.port.onmessage = (event: MessageEvent) => {
-    const payload = event.data;
-    if (payload.type === "queue_depth") {
-      const queuedSamples = typeof payload.queuedSamples === "number" ? payload.queuedSamples : 0;
-      callbacks.onPlaybackEvent?.({
-        type: "queue_depth",
-        queuedMs: Math.round((queuedSamples / context.sampleRate) * 1000),
-      });
-    } else if (payload.type === "player_started") {
-      callbacks.onPlaybackEvent?.({ type: "player_started" });
+
+  source.connect(captureNode);
+
+  const clearStartTimer = () => {
+    if (startTimer !== null) {
+      window.clearTimeout(startTimer);
+      startTimer = null;
     }
   };
 
-  source.connect(captureNode);
-  playerNode.connect(context.destination);
+  const emitQueueDepth = () => {
+    const queuedMs = Math.max(0, Math.round((bufferedUntil - context.currentTime) * 1000));
+    callbacks.onPlaybackEvent?.({
+      type: "queue_depth",
+      queuedMs,
+    });
+  };
+
+  const refreshBufferedUntil = () => {
+    let latestEnd = context.currentTime;
+    for (const endAt of sourceEndTimes.values()) {
+      if (endAt > latestEnd) {
+        latestEnd = endAt;
+      }
+    }
+    bufferedUntil = latestEnd;
+  };
+
+  const resetScheduling = () => {
+    clearStartTimer();
+    bufferedUntil = context.currentTime;
+    didReportStart = false;
+  };
 
   return {
     context,
     stream,
     source,
     captureNode,
-    playerNode,
     close: async () => {
       captureNode.port.onmessage = null;
-      playerNode.port.onmessage = null;
+      clearStartTimer();
+      for (const scheduledSource of activeSources) {
+        try {
+          scheduledSource.stop();
+        } catch {
+          // ignore stop failures during teardown
+        }
+      }
+      activeSources.clear();
+      sourceEndTimes.clear();
       captureNode.disconnect();
       source.disconnect();
-      playerNode.disconnect();
+      playerGainNode.disconnect();
       for (const track of stream.getTracks()) {
         track.stop();
       }
@@ -124,22 +154,65 @@ export async function createAudioRuntime(callbacks: CaptureCallbacks): Promise<A
       const int16 = new Int16Array(chunk);
       const floatChunk = pcm16ToFloat32(int16);
       const resampled = resampleLinear(floatChunk, 24000, context.sampleRate);
-      playerNode.port.postMessage(
-        {
-          type: "enqueue",
-          samples: resampled,
-        },
-        [resampled.buffer],
-      );
+      const audioBuffer = context.createBuffer(1, resampled.length, context.sampleRate);
+      const channelData = new Float32Array(resampled.length);
+      channelData.set(resampled);
+      audioBuffer.copyToChannel(channelData, 0);
+
+      const scheduledSource = context.createBufferSource();
+      scheduledSource.buffer = audioBuffer;
+      scheduledSource.connect(playerGainNode);
+
+      const startAt = Math.max(context.currentTime + playbackLeadTimeSec, bufferedUntil);
+      const endAt = startAt + audioBuffer.duration;
+      activeSources.add(scheduledSource);
+      sourceEndTimes.set(scheduledSource, endAt);
+      bufferedUntil = endAt;
+
+      if (!didReportStart) {
+        clearStartTimer();
+        startTimer = window.setTimeout(() => {
+          didReportStart = true;
+          startTimer = null;
+          callbacks.onPlaybackEvent?.({ type: "player_started" });
+        }, Math.max(0, Math.round((startAt - context.currentTime) * 1000)));
+      }
+
+      scheduledSource.onended = () => {
+        activeSources.delete(scheduledSource);
+        sourceEndTimes.delete(scheduledSource);
+        refreshBufferedUntil();
+        if (activeSources.size === 0) {
+          didReportStart = false;
+        }
+        emitQueueDepth();
+      };
+
+      scheduledSource.start(startAt);
+      emitQueueDepth();
     },
     softInterrupt: () => {
-      playerNode.port.postMessage({ type: "fade_down" });
+      playerGainNode.gain.cancelScheduledValues(context.currentTime);
+      playerGainNode.gain.setValueAtTime(playerGainNode.gain.value, context.currentTime);
+      playerGainNode.gain.linearRampToValueAtTime(0, context.currentTime + 0.12);
     },
     hardInterrupt: () => {
-      playerNode.port.postMessage({ type: "clear" });
+      clearStartTimer();
+      for (const scheduledSource of activeSources) {
+        try {
+          scheduledSource.stop();
+        } catch {
+          // ignore stop failures while clearing playback
+        }
+      }
+      activeSources.clear();
+      sourceEndTimes.clear();
+      resetScheduling();
+      emitQueueDepth();
     },
     resetPlayerGain: () => {
-      playerNode.port.postMessage({ type: "reset_gain" });
+      playerGainNode.gain.cancelScheduledValues(context.currentTime);
+      playerGainNode.gain.setValueAtTime(1, context.currentTime);
     },
   };
 }
