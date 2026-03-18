@@ -135,6 +135,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         security = get_security()
         security.validate_csrf(request)
         security.require_admin(request)
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            body = {}
+        if isinstance(body, dict) and body:
+            config = MuseumConfig.model_validate(body)
+            get_store().save_draft(config, updated_by="admin")
         published = get_store().publish_draft("admin")
         return {
             "version": published.version,

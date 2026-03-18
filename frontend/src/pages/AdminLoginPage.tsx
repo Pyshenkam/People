@@ -24,7 +24,7 @@ export function AdminLoginPage() {
         <Typography.Text className="eyebrow">ADMIN ACCESS</Typography.Text>
         <Typography.Title level={2}>后台登录</Typography.Title>
         <Typography.Paragraph>
-          每次进入后台都需要输入管理员密码。登录后可以修改提示词、人设、欢迎语和空闲超时。
+          每次进入后台都需要输入管理员密码。登录后可以修改提示词、人设、欢迎语、熊猫讲解音色和空闲超时。
         </Typography.Paragraph>
         <Form
           layout="vertical"

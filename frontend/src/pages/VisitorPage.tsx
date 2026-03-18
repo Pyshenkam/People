@@ -46,6 +46,13 @@ export function VisitorPage() {
     endConversation,
   } = useRealtimeSession(configResponse?.config ?? null);
 
+  const loadLatestConfig = async (): Promise<PublicConfigResponse> => {
+    const result = await fetchPublicConfig();
+    setConfigResponse(result);
+    setLoadError(null);
+    return result;
+  };
+
   useEffect(() => {
     let cancelled = false;
     void fetchPublicConfig()
@@ -75,6 +82,15 @@ export function VisitorPage() {
   const config = configResponse?.config ?? null;
   const isActive = activePhases.has(phase);
   const shouldShowUserSubtitle = Boolean(userText) && subtitleEligiblePhases.has(phase);
+
+  const handleStartConversation = async () => {
+    try {
+      const latest = await loadLatestConfig();
+      await startConversation(latest.config);
+    } catch (requestError) {
+      setLoadError(requestError instanceof Error ? requestError.message : "加载配置失败。");
+    }
+  };
 
   // --- 字幕可见性逻辑（简化版）---
   // 当收到新的 replyId 或新文本时，立即显示字幕
@@ -203,7 +219,7 @@ export function VisitorPage() {
                   size="large"
                   className="hero-button"
                   loading={phase === "opening_session"}
-                  onClick={() => void startConversation()}
+                  onClick={() => void handleStartConversation()}
                 >
                   开始对话
                 </Button>

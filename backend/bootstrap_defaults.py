@@ -10,15 +10,12 @@ def main() -> None:
     security = AdminSecurity(settings)
     store = ConfigStore(settings.database_path)
     store.initialize(settings.default_config, security.hash_password(settings.admin_password))
-
     published = store.get_published()
-    if published.config.model_dump(mode="json") == settings.default_config.model_dump(mode="json"):
-        print("Default config already matches current published version.")
-        return
-
-    store.save_draft(settings.default_config, updated_by="startup-script")
-    new_published = store.publish_draft("startup-script")
-    print(f"Published startup defaults as version {new_published.version}.")
+    draft = store.get_draft()
+    print(
+        "Bootstrap complete. Preserved existing config state "
+        f"(draft updated_by={draft.updated_by}, published version={published.version}, actor={published.actor})."
+    )
 
 
 if __name__ == "__main__":

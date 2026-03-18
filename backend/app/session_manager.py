@@ -105,12 +105,14 @@ class RealtimeSessionManager:
             )
             self._active = handle
             logger.info(
-                "session_opening session_id=%s client_id=%s upstream_mode=%s upstream_client=%s config_version=%s",
+                "session_opening session_id=%s client_id=%s upstream_mode=%s upstream_client=%s config_version=%s speaker=%s playback_tone=%s",
                 handle.session_id,
                 handle.client_id,
                 self.settings.upstream_mode,
                 type(handle.upstream).__name__,
                 handle.config_version,
+                handle.config.speaker,
+                handle.config.playback_tone,
             )
             timeout = self.settings.upstream_connect_timeout_seconds
             try:

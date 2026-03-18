@@ -13,6 +13,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
+import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { driveAvatar, inspectAvatar } from "../avatar/adapter";
 import { resolveAvatarPreset, type AvatarPreset } from "../avatar/presets";
 import type { VisitorPhase } from "../types/api";
@@ -24,6 +25,16 @@ interface AvatarStageProps {
 }
 
 const stageEnvironmentFile = "/environments/rogland_clear_night_1k.hdr";
+const stageCoolAccent = "#78dcff";
+const stageWarmAccent = "#9fd7ff";
+const stageGlassAccent = "#8ad6ff";
+
+function resolveMotionPhase(phase: VisitorPhase): VisitorPhase {
+  if (phase === "user_speaking") {
+    return "listening";
+  }
+  return phase;
+}
 
 function phasePulse(duration: number, elapsed: number): number {
   if (elapsed <= 0 || elapsed >= duration) {
@@ -38,19 +49,20 @@ function FallbackAvatar({ level, phase }: { level: number; phase: VisitorPhase }
   const torsoRef = useRef<THREE.Mesh>(null);
   const leftArmRef = useRef<THREE.Mesh>(null);
   const rightArmRef = useRef<THREE.Mesh>(null);
-  const phaseRef = useRef({ phase, startedAt: 0 });
+  const motionPhase = resolveMotionPhase(phase);
+  const phaseRef = useRef({ phase: motionPhase, startedAt: 0 });
 
   useFrame(({ clock }) => {
     const elapsed = clock.getElapsedTime();
-    if (phaseRef.current.phase !== phase) {
-      phaseRef.current = { phase, startedAt: elapsed };
+    if (phaseRef.current.phase !== motionPhase) {
+      phaseRef.current = { phase: motionPhase, startedAt: elapsed };
     }
     const phaseElapsed = elapsed - phaseRef.current.startedAt;
     const breathe = Math.sin(elapsed * 1.6);
-    const greetingWeight = phase === "greeting" ? phasePulse(1.15, phaseElapsed) : 0;
-    const speakingWeight = phase === "speaking" ? 1 : 0;
-    const listeningWeight = phase === "listening" || phase === "user_speaking" ? 1 : 0;
-    const thinkingWeight = phase === "thinking" ? 1 : 0;
+    const greetingWeight = motionPhase === "greeting" ? phasePulse(1.15, phaseElapsed) : 0;
+    const speakingWeight = motionPhase === "speaking" ? 1 : 0;
+    const listeningWeight = motionPhase === "listening" ? 1 : 0;
+    const thinkingWeight = motionPhase === "thinking" ? 1 : 0;
     const wave = greetingWeight * Math.sin(phaseElapsed * 16);
 
     if (groupRef.current) {
@@ -128,10 +140,19 @@ function LoadedAvatar({
   preset: AvatarPreset;
 }) {
   const root = useRef<THREE.Group>(null);
-  const phaseRef = useRef({ phase, startedAt: 0 });
+  const motionPhase = resolveMotionPhase(phase);
+  const phaseRef = useRef({
+    phase: motionPhase,
+    startedAt: 0,
+    previousPhase: null as VisitorPhase | null,
+    previousPhaseElapsed: 0,
+    transitionStartedAt: 0,
+  });
   const { scene, animations } = useGLTF(avatarUrl);
   const fitted = useMemo(() => {
-    const clone = scene.clone(true);
+    // Skinned meshes need SkeletonUtils.clone(); a plain scene.clone(true)
+    // keeps the outer hierarchy but can leave bone-driven deformation inert.
+    const clone = cloneSkinned(scene);
     const rootCorrection = preset.rigRootRotation;
     if (rootCorrection[0] !== 0 || rootCorrection[1] !== 0 || rootCorrection[2] !== 0) {
       const rigRoot = clone.getObjectByName("Root");
@@ -197,20 +218,40 @@ function LoadedAvatar({
 
   useEffect(() => {
     if (bindings.idleClipName) {
-      actions[bindings.idleClipName]?.reset().fadeIn(0.3).play();
+      // The model's authored idle clip fights the procedural phase poses and
+      // reads as constant random swaying, so keep it disabled here.
+      actions[bindings.idleClipName]?.stop();
     }
   }, [actions, bindings.idleClipName]);
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     const elapsed = clock.getElapsedTime();
-    if (phaseRef.current.phase !== phase) {
-      phaseRef.current = { phase, startedAt: elapsed };
+    if (phaseRef.current.phase !== motionPhase) {
+      phaseRef.current = {
+        phase: motionPhase,
+        startedAt: elapsed,
+        previousPhase: phaseRef.current.phase,
+        previousPhaseElapsed: elapsed - phaseRef.current.startedAt,
+        transitionStartedAt: elapsed,
+      };
+    }
+    const transitionElapsed = elapsed - phaseRef.current.transitionStartedAt;
+    const transitionProgress = THREE.MathUtils.clamp(transitionElapsed / 0.32, 0, 1);
+    if (phaseRef.current.previousPhase && transitionProgress >= 1) {
+      phaseRef.current.previousPhase = null;
+      phaseRef.current.previousPhaseElapsed = 0;
     }
     const rigOffset = driveAvatar(bindings, {
+      delta,
       level,
       elapsed,
-      phase,
+      phase: motionPhase,
       phaseElapsed: elapsed - phaseRef.current.startedAt,
+      previousPhase: phaseRef.current.previousPhase,
+      previousPhaseElapsed: phaseRef.current.previousPhase
+        ? phaseRef.current.previousPhaseElapsed + transitionElapsed
+        : 0,
+      transitionProgress,
     });
 
     if (root.current) {
@@ -279,75 +320,297 @@ function StageEnvironment({ accent, warmAccent }: { accent: string; warmAccent: 
   );
 }
 
+function useRadialGlowTexture() {
+  const texture = useMemo(() => {
+    if (typeof document === "undefined") {
+      return null;
+    }
+
+    const size = 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+
+    const gradient = context.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, "rgba(255, 255, 255, 1)");
+    gradient.addColorStop(0.22, "rgba(255, 255, 255, 0.78)");
+    gradient.addColorStop(0.58, "rgba(255, 255, 255, 0.18)");
+    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, size, size);
+
+    const glowTexture = new THREE.CanvasTexture(canvas);
+    glowTexture.colorSpace = THREE.SRGBColorSpace;
+    glowTexture.needsUpdate = true;
+    return glowTexture;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      texture?.dispose();
+    };
+  }, [texture]);
+
+  return texture;
+}
+
+interface NebulaGlowProps {
+  position: [number, number, number];
+  scale: [number, number, number];
+  color: string;
+  opacity: number;
+}
+
+function NebulaGlow({ position, scale, color, opacity }: NebulaGlowProps) {
+  const texture = useRadialGlowTexture();
+
+  if (!texture) {
+    return null;
+  }
+
+  return (
+    <sprite position={position} scale={scale}>
+      <spriteMaterial
+        map={texture}
+        color={color}
+        transparent
+        opacity={opacity}
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
+        toneMapped={false}
+      />
+    </sprite>
+  );
+}
+
+interface ParallaxStarLayerProps {
+  center: [number, number, number];
+  span: [number, number, number];
+  count: number;
+  color: string;
+  size: number;
+  opacity: number;
+  drift?: number;
+  twinkle?: number;
+}
+
+function ParallaxStarLayer({
+  center,
+  span,
+  count,
+  color,
+  size,
+  opacity,
+  drift = 0.12,
+  twinkle = 0.4,
+}: ParallaxStarLayerProps) {
+  const pointsRef = useRef<THREE.Points>(null);
+  const [spanX, spanY, spanZ] = span;
+
+  const geometry = useMemo(() => {
+    const positions = new Float32Array(count * 3);
+    for (let index = 0; index < count; index += 1) {
+      positions[index * 3] = THREE.MathUtils.randFloatSpread(spanX);
+      positions[index * 3 + 1] = THREE.MathUtils.randFloatSpread(spanY);
+      positions[index * 3 + 2] = -Math.random() * spanZ;
+    }
+
+    const starGeometry = new THREE.BufferGeometry();
+    starGeometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    return starGeometry;
+  }, [count, spanX, spanY, spanZ]);
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+    };
+  }, [geometry]);
+
+  useFrame(({ clock }) => {
+    if (!pointsRef.current) {
+      return;
+    }
+
+    const elapsed = clock.getElapsedTime();
+    pointsRef.current.position.set(
+      center[0] + Math.sin(elapsed * drift * 0.32) * 0.08,
+      center[1] + Math.cos(elapsed * drift * 0.24) * 0.04,
+      center[2],
+    );
+    pointsRef.current.rotation.z = Math.sin(elapsed * drift) * 0.018;
+
+    const material = pointsRef.current.material;
+    if (material instanceof THREE.PointsMaterial) {
+      const shimmer = (Math.sin(elapsed * (1.4 + drift) + size * 18) + 1) * 0.5;
+      material.opacity = opacity * (1 - twinkle * 0.12 + shimmer * twinkle * 0.24);
+    }
+  });
+
+  return (
+    <points ref={pointsRef} geometry={geometry} position={center} frustumCulled={false}>
+      <pointsMaterial
+        color={color}
+        size={size}
+        sizeAttenuation
+        transparent
+        opacity={opacity}
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
+        toneMapped={false}
+      />
+    </points>
+  );
+}
+
 function ObservationConsole({ side, accent, floorY }: { side: -1 | 1; accent: string; floorY: number }) {
   return (
-    <group position={[side * 3.7, floorY + 0.9, -1.4]} rotation={[0, -side * 0.4, 0]}>
+    <group position={[side * 4.82, floorY + 0.78, -2.76]} rotation={[0, -side * 0.68, 0]} scale={0.76}>
       <mesh castShadow>
-        <boxGeometry args={[0.82, 2.05, 1.06]} />
-        <meshStandardMaterial color="#0b1323" metalness={0.52} roughness={0.42} emissive="#091220" emissiveIntensity={0.28} />
+        <boxGeometry args={[0.74, 1.82, 0.96]} />
+        <meshStandardMaterial
+          color="#07101a"
+          metalness={0.42}
+          roughness={0.62}
+          emissive="#07101a"
+          emissiveIntensity={0.08}
+          transparent
+          opacity={0.34}
+        />
       </mesh>
-      <mesh position={[0, 0.1, 0.54]}>
-        <planeGeometry args={[0.52, 1.36]} />
-        <meshBasicMaterial color="#07101e" />
+      <mesh position={[0, 0.08, 0.49]}>
+        <planeGeometry args={[0.46, 1.18]} />
+        <meshBasicMaterial color="#07101e" transparent opacity={0.32} />
       </mesh>
-      <mesh position={[0, 0.18, 0.55]}>
-        <planeGeometry args={[0.12, 1.2]} />
-        <meshBasicMaterial color={accent} transparent opacity={0.65} />
+      <mesh position={[0, 0.16, 0.5]}>
+        <planeGeometry args={[0.11, 1.08]} />
+        <meshBasicMaterial color={accent} transparent opacity={0.42} />
       </mesh>
-      <mesh position={[0, -0.78, 0.56]}>
-        <planeGeometry args={[0.4, 0.12]} />
-        <meshBasicMaterial color="#ffd39f" transparent opacity={0.55} />
+      <mesh position={[0, -0.68, 0.51]}>
+        <planeGeometry args={[0.34, 0.1]} />
+        <meshBasicMaterial color="#ffd39f" transparent opacity={0.28} />
       </mesh>
     </group>
   );
 }
 
-function ObservationWindowBackdrop({ phase, floorY }: { phase: VisitorPhase; floorY: number }) {
-  const accent = phase === "listening" || phase === "user_speaking" ? "#99fff1" : "#7ad7ff";
-  const glassAccent = phase === "speaking" ? "#ffd3a2" : "#7ecfff";
+function ObservationWindowBackdrop({ floorY }: { floorY: number }) {
+  const accent = stageCoolAccent;
+  const glassAccent = stageGlassAccent;
   const windowCenterY = floorY + 1.16;
 
   return (
     <group>
-      <mesh position={[0, windowCenterY + 0.08, -11.8]}>
-        <planeGeometry args={[18, 9]} />
-        <meshBasicMaterial color="#02050d" />
+      <mesh position={[0, windowCenterY + 0.08, -12.15]}>
+        <planeGeometry args={[20, 10.4]} />
+        <meshBasicMaterial color="#030814" />
       </mesh>
 
-      <Stars radius={46} depth={18} count={520} factor={2.2} saturation={0} fade speed={0.18} />
-      <Sparkles count={16} scale={[7.4, 2.8, 5.4]} size={1.55} speed={0.12} color={accent} />
+      <NebulaGlow position={[0, windowCenterY + 0.34, -11.8]} scale={[11.8, 5.2, 1]} color="#0f1d41" opacity={0.22} />
+      <NebulaGlow position={[-2.8, windowCenterY + 0.9, -11.4]} scale={[8.4, 4.7, 1]} color="#1b4387" opacity={0.24} />
+      <NebulaGlow position={[2.55, windowCenterY + 0.02, -11.05]} scale={[6.8, 3.9, 1]} color="#2966b5" opacity={0.18} />
+      <NebulaGlow position={[0.52, windowCenterY + 1.1, -10.75]} scale={[4.8, 2.6, 1]} color="#6ee2ff" opacity={0.16} />
+      <NebulaGlow position={[-0.7, windowCenterY - 0.8, -10.6]} scale={[5.8, 3.0, 1]} color="#132149" opacity={0.14} />
+      <NebulaGlow position={[3.4, windowCenterY + 0.78, -10.9]} scale={[5.6, 2.8, 1]} color="#8adfff" opacity={0.09} />
+
+      <ParallaxStarLayer
+        center={[0, windowCenterY + 0.12, -11.1]}
+        span={[11.5, 5.2, 1.5]}
+        count={1280}
+        color="#8fb6ff"
+        size={0.052}
+        opacity={0.54}
+        drift={0.06}
+        twinkle={0.32}
+      />
+      <ParallaxStarLayer
+        center={[0.4, windowCenterY - 0.08, -10.15]}
+        span={[9.6, 4.4, 1.1]}
+        count={380}
+        color="#9ce7ff"
+        size={0.074}
+        opacity={0.62}
+        drift={0.09}
+        twinkle={0.4}
+      />
+      <ParallaxStarLayer
+        center={[0.18, windowCenterY + 0.02, -9.55]}
+        span={[8.9, 4.1, 1.05]}
+        count={340}
+        color="#e4f5ff"
+        size={0.094}
+        opacity={0.88}
+        drift={0.11}
+        twinkle={0.44}
+      />
+      <ParallaxStarLayer
+        center={[-0.2, windowCenterY + 0.2, -8.55]}
+        span={[6.2, 2.9, 0.62]}
+        count={72}
+        color={glassAccent}
+        size={0.17}
+        opacity={0.98}
+        drift={0.18}
+        twinkle={0.62}
+      />
+      <ParallaxStarLayer
+        center={[1.1, windowCenterY + 0.46, -8.9]}
+        span={[7.6, 3.2, 0.78]}
+        count={96}
+        color="#ffffff"
+        size={0.21}
+        opacity={1}
+        drift={0.14}
+        twinkle={0.72}
+      />
+      <Stars radius={44} depth={12} count={680} factor={2.08} saturation={0.05} fade speed={0.1} />
+      <Sparkles count={30} scale={[10.8, 5.1, 9]} size={2.38} speed={0.12} color={accent} />
+      <Sparkles count={12} scale={[9.1, 3.8, 7]} size={3.35} speed={0.08} color={glassAccent} />
 
       <Cloud
-        position={[0, windowCenterY + 0.22, -10.2]}
-        scale={[3.8, 1.2, 1]}
-        bounds={[5.4, 0.85, 2]}
+        position={[0.24, windowCenterY + 0.26, -10.35]}
+        scale={[4.7, 1.34, 1]}
+        bounds={[6.1, 1.04, 2]}
+        segments={26}
+        opacity={0.32}
+        speed={0.08}
+        color="#1b3760"
+      />
+      <Cloud
+        position={[2.2, windowCenterY - 0.04, -9.45]}
+        scale={[3.1, 0.96, 1]}
+        bounds={[4.2, 0.78, 2]}
+        segments={24}
+        opacity={0.24}
+        speed={0.05}
+        color="#3571ab"
+      />
+      <Cloud
+        position={[-2.45, windowCenterY + 0.32, -9.25]}
+        scale={[3.5, 1.08, 1]}
+        bounds={[4.4, 0.86, 2]}
         segments={24}
         opacity={0.2}
-        speed={0.08}
-        color="#203759"
-      />
-      <Cloud
-        position={[1.8, windowCenterY - 0.06, -9.4]}
-        scale={[2.5, 0.9, 1]}
-        bounds={[3.2, 0.7, 2]}
-        segments={22}
-        opacity={0.26}
-        speed={0.05}
-        color="#345a89"
-      />
-      <Cloud
-        position={[-2.1, windowCenterY + 0.24, -9.1]}
-        scale={[2.8, 1.1, 1]}
-        bounds={[3.4, 0.8, 2]}
-        segments={20}
-        opacity={0.18}
         speed={0.04}
-        color="#162846"
+        color="#4070ab"
+      />
+      <Cloud
+        position={[-0.58, windowCenterY - 0.74, -8.95]}
+        scale={[2.8, 0.86, 1]}
+        bounds={[3.3, 0.66, 2]}
+        segments={20}
+        opacity={0.15}
+        speed={0.03}
+        color="#142247"
       />
 
       <mesh position={[0, windowCenterY, -6.7]}>
-        <planeGeometry args={[6.05, 3.05]} />
-        <meshPhysicalMaterial color="#3ba9d6" roughness={0.08} metalness={0.1} transparent opacity={0.08} />
+        <planeGeometry args={[6.2, 3.16]} />
+        <meshPhysicalMaterial color="#4db7e0" roughness={0.08} metalness={0.1} transparent opacity={0.07} />
       </mesh>
 
       <mesh position={[0, windowCenterY + 1.62, -5.95]} castShadow>
@@ -440,8 +703,8 @@ function CameraRig({ target }: { target: [number, number, number] }) {
 }
 
 export function AvatarStage({ avatarUrl, level, phase }: AvatarStageProps) {
-  const accent = phase === "listening" || phase === "user_speaking" ? "#8effef" : "#6fd7ff";
-  const warmAccent = phase === "speaking" ? "#ffc18a" : "#9bd2ff";
+  const accent = stageCoolAccent;
+  const warmAccent = stageWarmAccent;
   const preset = useMemo(() => resolveAvatarPreset(avatarUrl), [avatarUrl]);
 
   useEffect(() => {
@@ -469,8 +732,8 @@ export function AvatarStage({ avatarUrl, level, phase }: AvatarStageProps) {
   return (
     <div className="avatar-stage">
       <Canvas camera={{ position: preset.cameraPosition, fov: preset.cameraFov }} shadows dpr={[1, 2]}>
-        <color attach="background" args={["#030813"]} />
-        <fog attach="fog" args={["#030813", 7.5, 15.2]} />
+        <color attach="background" args={["#020611"]} />
+        <fog attach="fog" args={["#020611", 10.8, 24]} />
         <CameraRig target={preset.cameraTarget} />
         <ambientLight intensity={0.42} />
         <hemisphereLight intensity={0.56} groundColor="#010409" color="#b4e3ff" />
@@ -482,7 +745,7 @@ export function AvatarStage({ avatarUrl, level, phase }: AvatarStageProps) {
         <Suspense fallback={null}>
           <StageEnvironment accent={accent} warmAccent={warmAccent} />
         </Suspense>
-        <ObservationWindowBackdrop phase={phase} floorY={preset.floorY} />
+        <ObservationWindowBackdrop floorY={preset.floorY} />
         <Suspense fallback={<FallbackAvatar level={level} phase={phase} />}>
           {avatarUrl ? (
             <LoadedAvatar avatarUrl={avatarUrl} level={level} phase={phase} preset={preset} />

@@ -55,7 +55,8 @@ class Settings:
             ),
             model_family=os.getenv("DEFAULT_MODEL_FAMILY", "O2.0"),  # type: ignore[arg-type]
             model=os.getenv("DEFAULT_MODEL") or None,
-            speaker=os.getenv("DEFAULT_SPEAKER", "zh_male_yunzhou_jupiter_bigtts"),
+            speaker=os.getenv("DEFAULT_SPEAKER", "zh_male_xiaotian_jupiter_bigtts"),
+            playback_tone=os.getenv("DEFAULT_PLAYBACK_TONE", "panda_warm"),  # type: ignore[arg-type]
             bot_name=os.getenv("DEFAULT_BOT_NAME", "星馆助手"),
             system_role=os.getenv(
                 "DEFAULT_SYSTEM_ROLE",

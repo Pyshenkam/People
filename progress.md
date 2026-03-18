@@ -77,3 +77,47 @@
 - Repo-level text normalization follow-up:
   - Added root `.editorconfig` with `utf-8`, `lf`, `insert_final_newline = true`, and `trim_trailing_whitespace = true`.
   - Added root `.gitattributes` with `* text=auto eol=lf` plus binary markers for common assets (`.glb`, `.hdr`, images, fonts, audio/video, `.db`) so Git does not treat them as text.
+
+- Avatar motion follow-up after the user reported the panda still looked like a statue:
+  - Expanded `frontend/src/avatar/adapter.ts` so greeting, listening, thinking, speaking, opening, closing, and error phases all drive much larger bone rotations and body offsets while keeping the panda front-facing.
+  - Identified a more fundamental likely cause for the "only slight sway" symptom: `LoadedAvatar` was cloning the GLB with `scene.clone(true)`, which is unsafe for skinned meshes and can leave bone-driven deformation visually inert.
+  - Updated `frontend/src/components/AvatarStage.tsx` to use `SkeletonUtils.clone(scene)` instead, so the procedural bone animation should finally deform the panda mesh rather than only moving the outer group.
+  - Validation:
+    - `frontend`: `npm run build` passed after both the motion expansion and the skinned-clone fix.
+  - Note:
+    - Per the user's request, stopped using Playwright/browser automation and closed the temporary local test processes instead of doing more automated visual runs.
+
+- Motion smoothing follow-up after the user reported "ghostly"/abrupt transitions and weak listening cues:
+  - Refined `frontend/src/avatar/adapter.ts` to stop hard-snapping bones into each phase. Bone rotations now ease toward targets with quaternion slerp damping, and vertical offsets lerp instead of stepping.
+  - Added previous-phase carry-over to the avatar drive state so phase changes can crossfade for about `0.32s` instead of switching instantly.
+  - Reworked phase weighting into steady blends (`steadyPhaseWeight`) and pulse blends (`pulsePhaseWeight`) so short gestures like greeting/closing can fade out naturally while sustained states like listening/speaking fade in and out.
+  - Strengthened the readability of attentive behavior: listening and `user_speaking` now contribute more visible forward lean, head tilt, and nod pulses, while speaking arm swings were trimmed down to avoid "鬼畜" motion.
+  - Updated `frontend/src/components/AvatarStage.tsx` to track `previousPhase`, `previousPhaseElapsed`, and `transitionProgress`, then pass `delta` through to the driver so the smoothing math has frame-time context.
+  - Validation:
+    - `frontend`: `npm run build` passed after the smoothing and transition-blend changes.
+
+- Motion simplification follow-up after the user reported rapid stutter / constant wobble:
+  - Simplified the procedural animation grammar in `frontend/src/avatar/adapter.ts` so the avatar now prioritizes two readable states over complex layered motion: a stable attentive listening pose with clearer nods, and a stable speaking pose with light emphasis. Most idle sway, body drift, and multi-axis oscillation were removed.
+  - Updated `frontend/src/components/AvatarStage.tsx` so the animation layer treats `user_speaking` as the same motion phase as `listening`, preventing high-frequency visual resets when VAD bounces between those two app states.
+  - Disabled the GLB-authored idle clip in `LoadedAvatar`; mixing that clip with procedural bone posing was another likely source of the "stuck / jittering / always swaying" look.
+  - Validation:
+    - `frontend`: `npm run build` passed after the motion simplification and idle-clip disablement.
+
+- Background polish follow-up after the user asked to strengthen the current camera-mode starfield:
+  - Focused on `frontend/src/components/AvatarStage.tsx` instead of page CSS, since the visible background is driven by `ObservationWindowBackdrop` inside the 3D scene.
+  - Added reusable radial glow sprites plus procedural parallax star layers so the backdrop now has three clearer depths: far-field star dust, mid bright stars, and a nearer highlight band.
+  - Boosted the space look with extra nebula glow patches, denser `Stars` / `Sparkles`, and softer blue cloud volumes so the window reads more like a starfield instead of a dark wall.
+  - Pushed the side observation consoles farther outward and made them semi-transparent / less emissive so the right-side dark block stops stealing attention from the sky.
+  - Slightly relaxed scene fog distance and kept the change isolated to stage visuals; avatar framing, motion, and visitor interaction logic were not changed.
+  - Validation:
+    - `frontend`: `npm run build` passed after each background tuning pass.
+    - Captured fresh visual checks at `output/web-game/starfield-pass-1/shot-0.png`, `output/web-game/starfield-pass-2/shot-0.png`, and final `output/web-game/starfield-pass-3/shot-0.png`.
+    - `render_game_to_text` remained available and returned the expected idle-state payload during screenshot verification.
+    - Cleaned the detected Playwright `chrome-headless-shell` residue after verification; final process check showed no remaining Playwright browser process.
+
+- Follow-up after the user reported the stage still changed while speaking:
+  - Confirmed the background/stage color system was still tied to `phase` in `AvatarStage.tsx`, so listening/speaking state changes were recoloring light bars, sparkles, side panels, and stage lighting.
+  - Replaced those phase-driven backdrop accents with fixed stage constants (`stageCoolAccent`, `stageWarmAccent`, `stageGlassAccent`) so the environment now stays visually stable while only the avatar motion changes.
+  - Simplified `ObservationWindowBackdrop` to remove its `phase` dependency entirely; `StageEnvironment` and the extra spotlights now receive fixed accent values from `AvatarStage`.
+  - Validation:
+    - `frontend`: `npm run build` passed after freezing the stage accents.

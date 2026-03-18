@@ -253,8 +253,9 @@ export function useRealtimeSession(config: MuseumConfig | null) {
     audioRef.current?.enqueueTtsChunk(buffer);
   });
 
-  const startConversation = useEffectEvent(async () => {
-    if (!config || phaseRef.current !== "idle") {
+  const startConversation = useEffectEvent(async (configOverride?: MuseumConfig | null) => {
+    const activeConfig = configOverride ?? config;
+    if (!activeConfig || phaseRef.current !== "idle") {
       return;
     }
 
@@ -324,6 +325,8 @@ export function useRealtimeSession(config: MuseumConfig | null) {
           }
         },
         onPlaybackEvent: handlePlaybackEvent,
+      }, {
+        playbackTone: "panda_warm",
       });
 
       audioRef.current = audioRuntime;

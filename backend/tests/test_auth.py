@@ -32,3 +32,19 @@ def test_admin_login_and_config(tmp_path: Path) -> None:
         config = client.get("/api/admin/config")
         assert config.status_code == 200
         assert config.json()["published"]["version"] == 1
+        assert config.json()["published"]["config"]["playback_tone"] == "panda_warm"
+
+        updated_config = config.json()["draft"]["config"]
+        updated_config["playback_tone"] = "natural"
+
+        publish = client.post(
+            "/api/admin/config/publish",
+            json=updated_config,
+            headers={"x-csrf-token": csrf_token},
+        )
+        assert publish.status_code == 200
+
+        refreshed_config = client.get("/api/admin/config")
+        assert refreshed_config.status_code == 200
+        assert refreshed_config.json()["published"]["version"] == 2
+        assert refreshed_config.json()["published"]["config"]["playback_tone"] == "panda_warm"

@@ -8,12 +8,12 @@ import type {
 
 async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const response = await fetch(input, {
+    ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),
     },
-    ...init,
   });
   if (!response.ok) {
     const detail = await response.text();
@@ -70,13 +70,16 @@ export async function updateDraftConfig(config: MuseumConfig, csrfToken: string)
   });
 }
 
-export async function publishDraft(csrfToken: string): Promise<{ version: number; publishedAt: string }> {
+export async function publishDraft(
+  csrfToken: string,
+  config?: MuseumConfig,
+): Promise<{ version: number; publishedAt: string }> {
   return requestJson<{ version: number; publishedAt: string }>("/api/admin/config/publish", {
     method: "POST",
     headers: {
       "X-CSRF-Token": csrfToken,
     },
-    body: JSON.stringify({}),
+    body: JSON.stringify(config ?? {}),
   });
 }
 

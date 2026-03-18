@@ -3,9 +3,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 ModelFamily = Literal["O", "O2.0", "SC", "SC2.0"]
+PlaybackTone = Literal["natural", "panda_warm"]
+
+DEFAULT_SPEAKER_BY_FAMILY: dict[ModelFamily, str] = {
+    "O": "zh_male_xiaotian_jupiter_bigtts",
+    "O2.0": "zh_male_xiaotian_jupiter_bigtts",
+    "SC": "ICL_zh_female_wenrouwenya_tob",
+    "SC2.0": "saturn_zh_female_wenrouwenya_tob",
+}
 
 class LocationConfig(BaseModel):
     city: str = "北京"
@@ -23,7 +31,8 @@ class MuseumConfig(BaseModel):
     welcome_text: str = "你好，欢迎来到科技馆。点击开始对话后，我会实时听你说话。"
     model_family: ModelFamily = "O2.0"
     model: str | None = None
-    speaker: str = "zh_male_yunzhou_jupiter_bigtts"
+    speaker: str = "zh_male_xiaotian_jupiter_bigtts"
+    playback_tone: PlaybackTone = "panda_warm"
     bot_name: str = "星馆助手"
     system_role: str = "你是科技馆展厅里的数字讲解员，擅长用亲切、准确、口语化的方式介绍科技展品。"
     speaking_style: str = "回答简洁自然，适合面对面讲解，优先使用中文。"
@@ -47,6 +56,16 @@ class MuseumConfig(BaseModel):
         if not value:
             raise ValueError("bot_name is required")
         return value[:20]
+
+    @field_validator("playback_tone", mode="before")
+    @classmethod
+    def force_panda_warm(cls, _: str | None) -> PlaybackTone:
+        return "panda_warm"
+
+    @model_validator(mode="after")
+    def apply_voice_defaults(self) -> "MuseumConfig":
+        self.speaker = DEFAULT_SPEAKER_BY_FAMILY[self.model_family]
+        return self
 
     def to_upstream_payload(self) -> dict:
         dialog_payload: dict = {

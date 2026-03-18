@@ -21,6 +21,26 @@ export interface CaptureCallbacks {
   onPlaybackEvent?: (event: PlaybackEvent) => void;
 }
 
+export interface AudioRuntimeOptions {
+  playbackTone?: "natural" | "panda_warm";
+}
+
+function normalizePlaybackTone(
+  playbackTone: AudioRuntimeOptions["playbackTone"],
+): "panda_warm" {
+  return playbackTone === "natural" ? "panda_warm" : (playbackTone ?? "panda_warm");
+}
+
+function createSoftClipCurve(amount: number) {
+  const samples = 2048;
+  const curve = new Float32Array(new ArrayBuffer(samples * Float32Array.BYTES_PER_ELEMENT));
+  for (let index = 0; index < samples; index += 1) {
+    const x = (index / (samples - 1)) * 2 - 1;
+    curve[index] = ((1 + amount) * x) / (1 + amount * Math.abs(x));
+  }
+  return curve;
+}
+
 function pcm16ToFloat32(int16: Int16Array): Float32Array {
   const output = new Float32Array(int16.length);
   for (let index = 0; index < int16.length; index += 1) {
@@ -57,7 +77,114 @@ export function computeLevel(floatData: Float32Array): number {
   return Math.min(1, total / floatData.length / 0.25);
 }
 
-export async function createAudioRuntime(callbacks: CaptureCallbacks): Promise<AudioRuntime> {
+function createPlaybackChain(
+  context: AudioContext,
+  playbackTone: AudioRuntimeOptions["playbackTone"],
+): {
+  inputNode: GainNode;
+  gainNode: GainNode;
+  disconnect: () => void;
+} {
+  const inputNode = context.createGain();
+  const gainNode = context.createGain();
+  gainNode.gain.value = 1;
+  const effectiveTone = normalizePlaybackTone(playbackTone);
+
+  if (effectiveTone === "panda_warm") {
+    const lowShelf = context.createBiquadFilter();
+    lowShelf.type = "lowshelf";
+    lowShelf.frequency.value = 180;
+    lowShelf.gain.value = 3.4;
+
+    const lowBodyBoost = context.createBiquadFilter();
+    lowBodyBoost.type = "peaking";
+    lowBodyBoost.frequency.value = 320;
+    lowBodyBoost.Q.value = 0.88;
+    lowBodyBoost.gain.value = 2.4;
+
+    const lowMidBoost = context.createBiquadFilter();
+    lowMidBoost.type = "peaking";
+    lowMidBoost.frequency.value = 500;
+    lowMidBoost.Q.value = 0.62;
+    lowMidBoost.gain.value = 4;
+
+    const presenceCut = context.createBiquadFilter();
+    presenceCut.type = "peaking";
+    presenceCut.frequency.value = 3000;
+    presenceCut.Q.value = 1;
+    presenceCut.gain.value = -3.2;
+
+    const highShelfCut = context.createBiquadFilter();
+    highShelfCut.type = "highshelf";
+    highShelfCut.frequency.value = 3200;
+    highShelfCut.gain.value = -5.8;
+
+    const highSoftener = context.createBiquadFilter();
+    highSoftener.type = "lowpass";
+    highSoftener.frequency.value = 3600;
+    highSoftener.Q.value = 0.72;
+
+    const compressor = context.createDynamicsCompressor();
+    compressor.threshold.value = -24;
+    compressor.knee.value = 14;
+    compressor.ratio.value = 3.4;
+    compressor.attack.value = 0.005;
+    compressor.release.value = 0.2;
+
+    const saturator = context.createWaveShaper();
+    saturator.curve = createSoftClipCurve(0.32);
+    saturator.oversample = "4x";
+
+    const makeupGain = context.createGain();
+    makeupGain.gain.value = 1.16;
+
+    inputNode.connect(lowShelf);
+    lowShelf.connect(lowBodyBoost);
+    lowBodyBoost.connect(lowMidBoost);
+    lowMidBoost.connect(presenceCut);
+    presenceCut.connect(highShelfCut);
+    highShelfCut.connect(highSoftener);
+    highSoftener.connect(compressor);
+    compressor.connect(saturator);
+    saturator.connect(makeupGain);
+    makeupGain.connect(gainNode);
+    gainNode.connect(context.destination);
+
+    return {
+      inputNode,
+      gainNode,
+      disconnect: () => {
+        inputNode.disconnect();
+        lowShelf.disconnect();
+        lowBodyBoost.disconnect();
+        lowMidBoost.disconnect();
+        presenceCut.disconnect();
+        highShelfCut.disconnect();
+        highSoftener.disconnect();
+        compressor.disconnect();
+        saturator.disconnect();
+        makeupGain.disconnect();
+        gainNode.disconnect();
+      },
+    };
+  }
+
+  inputNode.connect(gainNode);
+  gainNode.connect(context.destination);
+  return {
+    inputNode,
+    gainNode,
+    disconnect: () => {
+      inputNode.disconnect();
+      gainNode.disconnect();
+    },
+  };
+}
+
+export async function createAudioRuntime(
+  callbacks: CaptureCallbacks,
+  options: AudioRuntimeOptions = {},
+): Promise<AudioRuntime> {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       channelCount: 1,
@@ -73,9 +200,10 @@ export async function createAudioRuntime(callbacks: CaptureCallbacks): Promise<A
 
   const source = context.createMediaStreamSource(stream);
   const captureNode = new AudioWorkletNode(context, "capture-processor");
-  const playerGainNode = context.createGain();
-  playerGainNode.gain.value = 1;
-  playerGainNode.connect(context.destination);
+  const playbackChain = createPlaybackChain(context, options.playbackTone);
+  const effectivePlaybackTone = normalizePlaybackTone(options.playbackTone);
+  const playerInputNode = playbackChain.inputNode;
+  const playerGainNode = playbackChain.gainNode;
   const activeSources = new Set<AudioBufferSourceNode>();
   const sourceEndTimes = new Map<AudioBufferSourceNode, number>();
   const playbackLeadTimeSec = 0.12;
@@ -144,7 +272,7 @@ export async function createAudioRuntime(callbacks: CaptureCallbacks): Promise<A
       sourceEndTimes.clear();
       captureNode.disconnect();
       source.disconnect();
-      playerGainNode.disconnect();
+      playbackChain.disconnect();
       for (const track of stream.getTracks()) {
         track.stop();
       }
@@ -161,10 +289,12 @@ export async function createAudioRuntime(callbacks: CaptureCallbacks): Promise<A
 
       const scheduledSource = context.createBufferSource();
       scheduledSource.buffer = audioBuffer;
-      scheduledSource.connect(playerGainNode);
+      scheduledSource.connect(playerInputNode);
+      const playbackRate = effectivePlaybackTone === "panda_warm" ? 0.92 : 1;
+      scheduledSource.playbackRate.value = playbackRate;
 
       const startAt = Math.max(context.currentTime + playbackLeadTimeSec, bufferedUntil);
-      const endAt = startAt + audioBuffer.duration;
+      const endAt = startAt + audioBuffer.duration / playbackRate;
       activeSources.add(scheduledSource);
       sourceEndTimes.set(scheduledSource, endAt);
       bufferedUntil = endAt;

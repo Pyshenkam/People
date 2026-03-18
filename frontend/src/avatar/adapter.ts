@@ -29,9 +29,13 @@ export interface AvatarBindings {
 
 export interface AvatarDriveState {
   level: number;
+  delta: number;
   elapsed: number;
   phase: VisitorPhase;
   phaseElapsed: number;
+  previousPhase?: VisitorPhase | null;
+  previousPhaseElapsed?: number;
+  transitionProgress?: number;
 }
 
 export interface AvatarRigOffset {
@@ -43,10 +47,43 @@ const mouthCandidates = ["viseme_aa", "mouthopen", "jawopen", "a", "ah"];
 const blinkCandidates = ["blink", "eyeBlinkLeft", "eyeBlinkRight"];
 const scratchEuler = new THREE.Euler();
 const scratchQuaternion = new THREE.Quaternion();
+const scratchTargetQuaternion = new THREE.Quaternion();
+const scratchTargetPosition = new THREE.Vector3();
 const neutralRigOffset: AvatarRigOffset = {
   position: [0, 0, 0],
   rotation: [0, 0, 0],
 };
+
+function dampAlpha(delta: number, speed: number): number {
+  return 1 - Math.exp(-Math.max(delta, 1 / 120) * speed);
+}
+
+function phaseWeight(isActive: boolean, phaseElapsed: number, fadeIn = 0.24): number {
+  if (!isActive) {
+    return 0;
+  }
+  return THREE.MathUtils.smoothstep(Math.min(phaseElapsed, fadeIn), 0, fadeIn);
+}
+
+function blendOut(progress: number): number {
+  return 1 - THREE.MathUtils.smootherstep(THREE.MathUtils.clamp(progress, 0, 1), 0, 1);
+}
+
+function steadyPhaseWeight(state: AvatarDriveState, phaseName: VisitorPhase, fadeIn = 0.24): number {
+  const current = state.phase === phaseName ? phaseWeight(true, state.phaseElapsed, fadeIn) : 0;
+  const previous =
+    state.previousPhase === phaseName ? blendOut(state.transitionProgress ?? 1) : 0;
+  return THREE.MathUtils.clamp(current + previous, 0, 1);
+}
+
+function pulsePhaseWeight(state: AvatarDriveState, phaseName: VisitorPhase, duration: number): number {
+  const current = state.phase === phaseName ? phasePulse(duration, state.phaseElapsed) : 0;
+  const previous =
+    state.previousPhase === phaseName
+      ? phasePulse(duration, state.previousPhaseElapsed ?? 0) * blendOut(state.transitionProgress ?? 1)
+      : 0;
+  return THREE.MathUtils.clamp(current + previous, 0, 1);
+}
 
 function findMorph(dictionary: Record<string, number>, names: string[]): number | undefined {
   const normalized = Object.entries(dictionary).map(([name, index]) => ({
@@ -129,24 +166,23 @@ function captureBone(bindings: AvatarBindings, node: THREE.Bone): void {
   }
 }
 
-function applyRotation(binding: BoneBinding | undefined, x = 0, y = 0, z = 0): void {
+function applyRotation(binding: BoneBinding | undefined, delta: number, x = 0, y = 0, z = 0, speed = 10): void {
   if (!binding) {
-    return;
-  }
-  binding.bone.quaternion.copy(binding.restQuaternion);
-  if (x === 0 && y === 0 && z === 0) {
     return;
   }
   scratchEuler.set(x, y, z, "XYZ");
-  binding.bone.quaternion.multiply(scratchQuaternion.setFromEuler(scratchEuler));
+  scratchTargetQuaternion.copy(binding.restQuaternion);
+  scratchTargetQuaternion.multiply(scratchQuaternion.setFromEuler(scratchEuler));
+  binding.bone.quaternion.slerp(scratchTargetQuaternion, dampAlpha(delta, speed));
 }
 
-function applyPositionY(binding: BoneBinding | undefined, offsetY = 0): void {
+function applyPositionY(binding: BoneBinding | undefined, delta: number, offsetY = 0, speed = 9): void {
   if (!binding) {
     return;
   }
-  binding.bone.position.copy(binding.restPosition);
-  binding.bone.position.y += offsetY;
+  scratchTargetPosition.copy(binding.restPosition);
+  scratchTargetPosition.y += offsetY;
+  binding.bone.position.lerp(scratchTargetPosition, dampAlpha(delta, speed));
 }
 
 function phasePulse(duration: number, phaseElapsed: number): number {
@@ -198,28 +234,36 @@ export function inspectAvatar(root: THREE.Object3D, animations: THREE.AnimationC
 
 export function driveAvatar(bindings: AvatarBindings, state: AvatarDriveState): AvatarRigOffset {
   const level = THREE.MathUtils.clamp(state.level, 0, 1);
-  const breathe = Math.sin(state.elapsed * 1.65);
-  const idleSway = Math.sin(state.elapsed * 0.92);
-  const curiousLook = Math.sin(state.elapsed * 0.72);
-  const speechBeat = Math.sin(state.elapsed * (6.4 + level * 2.4));
-  const speechLift = Math.max(0, speechBeat);
-  const greetingWeight = state.phase === "greeting" ? phasePulse(1.2, state.phaseElapsed) : 0;
-  const greetingWave = greetingWeight * Math.sin(state.phaseElapsed * 17);
-  const listeningWeight = state.phase === "listening" ? 1 : 0;
-  const userSpeakingWeight = state.phase === "user_speaking" ? 1 : 0;
-  const thinkingWeight = state.phase === "thinking" ? 1 : 0;
-  const speakingWeight = state.phase === "speaking" ? 1 : 0;
-  const idleWeight = state.phase === "idle" || state.phase === "boot" || state.phase === "opening_session" ? 1 : 0;
-  const settleWeight =
-    state.phase === "interrupted" || state.phase === "closing_session" || state.phase === "error"
-      ? phasePulse(0.55, state.phaseElapsed)
-      : 0;
+  const delta = state.delta;
+  const breathe = Math.sin(state.elapsed * 1.3);
+  const speakingBeat = Math.max(0, Math.sin(state.phaseElapsed * (2.6 + level * 0.35)));
+  const greetingWeight = pulsePhaseWeight(state, "greeting", 0.95);
+  const greetingRaise = greetingWeight * Math.max(0, Math.sin(Math.min(state.phaseElapsed, 0.95) * 3.5));
+  const greetingWave = greetingWeight * Math.sin(Math.min(state.phaseElapsed, 0.95) * 7);
+  const listeningWeight = steadyPhaseWeight(state, "listening", 0.18);
+  const userSpeakingWeight = steadyPhaseWeight(state, "user_speaking", 0.18);
+  const attentiveWeight = THREE.MathUtils.clamp(listeningWeight + userSpeakingWeight, 0, 1);
+  const listeningNod = attentiveWeight * Math.pow(Math.max(0, Math.sin(state.phaseElapsed * 1.75)), 2);
+  const thinkingWeight = steadyPhaseWeight(state, "thinking", 0.22);
+  const speakingWeight = steadyPhaseWeight(state, "speaking", 0.18);
+  const speakingEmphasis = speakingWeight * speakingBeat;
+  const openingWeight = steadyPhaseWeight(state, "opening_session", 0.25);
+  const closingWeight = pulsePhaseWeight(state, "closing_session", 0.7);
+  const interruptedWeight = pulsePhaseWeight(state, "interrupted", 0.45);
+  const errorWeight = steadyPhaseWeight(state, "error", 0.3);
+  const settleWeight = interruptedWeight + closingWeight * 0.7;
+  const speechShape = Math.max(speakingEmphasis, greetingWeight * 0.55);
+  const listeningFold = 0.03 * attentiveWeight;
+  const speakingOpen = 0.045 * speakingWeight + 0.09 * speakingEmphasis;
+  const thinkingLift = 0.18 * thinkingWeight;
+  const rightArmLift = 0.42 * greetingRaise + 0.18 * closingWeight;
+  const rightWave = 0.12 * greetingWave + 0.07 * closingWeight * Math.sin(Math.min(state.phaseElapsed, 0.8) * 5.5);
 
   if (bindings.mouthMorph) {
     const influence =
-      state.phase === "speaking" || state.phase === "greeting"
-        ? 0.08 + (0.16 + level * 0.72) * (0.35 + speechLift * 0.65)
-        : 0.02;
+      speechShape > 0.01
+        ? 0.04 + (0.12 + level * 0.22) * (0.35 + speechShape * 0.65)
+        : 0.015;
     bindings.mouthMorph.mesh.morphTargetInfluences![bindings.mouthMorph.index] = influence;
   }
 
@@ -231,102 +275,156 @@ export function driveAvatar(bindings: AvatarBindings, state: AvatarDriveState): 
 
   if (bindings.jawBone) {
     const jawOpen =
-      state.phase === "speaking" || state.phase === "greeting"
-        ? 0.03 + level * 0.12 * (0.4 + speechLift * 0.6)
-        : 0.01;
-    applyRotation(bindings.jawBone, jawOpen, 0, 0);
+      speechShape > 0.01
+        ? 0.012 + level * 0.05 * (0.35 + speechShape * 0.65)
+        : 0.004;
+    applyRotation(bindings.jawBone, delta, jawOpen, 0, 0, 14);
   }
 
-  applyPositionY(bindings.hipBone);
-  applyPositionY(bindings.lowerSpineBone);
-  applyPositionY(bindings.upperSpineBone);
-  applyPositionY(bindings.neckBone);
-  applyPositionY(bindings.headBone);
+  applyPositionY(bindings.hipBone, delta);
+  applyPositionY(bindings.lowerSpineBone, delta);
+  applyPositionY(bindings.upperSpineBone, delta);
+  applyPositionY(bindings.neckBone, delta);
+  applyPositionY(bindings.headBone, delta);
 
   applyRotation(
     bindings.hipBone,
-    0.008 * breathe + 0.026 * listeningWeight + 0.022 * userSpeakingWeight + 0.01 * speechLift * speakingWeight - 0.02 * settleWeight,
-    0.01 * idleSway,
+    delta,
+    0.004 * breathe +
+      0.012 * attentiveWeight +
+      0.008 * speakingEmphasis +
+      0.008 * openingWeight -
+      0.012 * settleWeight -
+      0.014 * errorWeight,
     0,
+    0,
+    9,
   );
   applyRotation(
     bindings.lowerSpineBone,
-    0.016 * breathe + 0.032 * listeningWeight + 0.038 * userSpeakingWeight + 0.018 * speechLift * speakingWeight + 0.05 * greetingWeight,
-    0.02 * idleSway + 0.012 * curiousLook * thinkingWeight,
-    0.01 * idleSway,
+    delta,
+    0.008 * breathe +
+      0.024 * attentiveWeight +
+      0.012 * speakingEmphasis +
+      0.012 * openingWeight -
+      0.016 * settleWeight -
+      0.018 * errorWeight,
+    0,
+    0,
+    9,
   );
   applyRotation(
     bindings.upperSpineBone,
-    0.022 * breathe + 0.05 * listeningWeight + 0.056 * userSpeakingWeight + 0.028 * speechLift * speakingWeight + 0.065 * greetingWeight,
-    0.014 * curiousLook * thinkingWeight + 0.012 * Math.sin(state.elapsed * 1.9) * speakingWeight,
-    0.012 * idleSway,
+    delta,
+    0.01 * breathe +
+      0.045 * attentiveWeight +
+      0.02 * speakingEmphasis +
+      0.018 * greetingRaise +
+      0.014 * openingWeight -
+      0.018 * settleWeight -
+      0.02 * errorWeight,
+    0.006 * speakingEmphasis - 0.01 * thinkingWeight,
+    -0.01 * attentiveWeight,
+    10,
   );
   applyRotation(
     bindings.neckBone,
-    0.012 * breathe + 0.028 * listeningWeight + 0.034 * userSpeakingWeight + 0.012 * speechLift * speakingWeight + 0.04 * greetingWeight,
-    0.012 * idleSway + 0.04 * curiousLook * thinkingWeight,
-    -0.02 * listeningWeight + 0.028 * userSpeakingWeight,
+    delta,
+    0.006 * breathe +
+      0.018 * attentiveWeight +
+      0.01 * speakingEmphasis +
+      0.02 * listeningNod -
+      0.012 * settleWeight -
+      0.014 * errorWeight,
+    0.004 * speakingEmphasis - 0.016 * thinkingWeight,
+    -0.02 * listeningWeight - 0.05 * thinkingWeight,
+    12,
   );
   applyRotation(
     bindings.headBone,
-    0.016 * breathe + 0.045 * listeningWeight + 0.06 * userSpeakingWeight + 0.032 * speechLift * speakingWeight + 0.08 * greetingWeight - 0.016 * settleWeight,
-    0.012 * idleSway + 0.052 * curiousLook * thinkingWeight + 0.02 * Math.sin(state.elapsed * 1.6) * speakingWeight,
-    -0.03 * listeningWeight + 0.05 * userSpeakingWeight + 0.012 * greetingWave,
+    delta,
+    0.008 * breathe +
+      0.026 * attentiveWeight +
+      0.016 * speakingEmphasis +
+      0.065 * listeningNod +
+      0.02 * greetingRaise -
+      0.012 * settleWeight -
+      0.014 * errorWeight,
+    0.008 * speakingEmphasis - 0.022 * thinkingWeight + 0.006 * greetingWave,
+    -0.03 * listeningWeight + 0.035 * userSpeakingWeight - 0.08 * thinkingWeight,
+    13,
   );
-
-  const speakingOpen = speakingWeight * (0.12 + level * 0.18) * (0.5 + 0.5 * Math.sin(state.elapsed * 4.8));
-  const speakingSwing = speakingWeight * (0.16 + level * 0.14) * Math.sin(state.elapsed * 4.1);
-  const listeningFold = 0.05 * listeningWeight + 0.07 * userSpeakingWeight;
 
   applyRotation(
     bindings.leftClavicleBone,
-    -0.04 * speakingOpen,
-    -0.045 * listeningFold - 0.04 * speakingOpen,
-    -0.02 * speakingSwing,
+    delta,
+    0.015 * thinkingLift,
+    -0.018 * listeningFold - 0.02 * speakingOpen + 0.02 * thinkingLift,
+    0,
+    10,
   );
   applyRotation(
     bindings.rightClavicleBone,
-    0.14 * greetingWeight + 0.02 * speechLift * speakingWeight,
-    0.28 * greetingWeight + 0.05 * speakingOpen - 0.04 * listeningFold,
-    -0.02 * speakingSwing - 0.05 * greetingWeight,
+    delta,
+    0.08 * greetingRaise + 0.02 * closingWeight,
+    0.12 * greetingRaise + 0.02 * speakingOpen - 0.015 * listeningFold,
+    0,
+    10,
   );
   applyRotation(
     bindings.leftUpperArmBone,
-    0.12 * speakingOpen,
-    -0.02 * speakingSwing,
-    0.06 * speakingSwing + 0.03 * listeningFold,
+    delta,
+    0.04 * speakingOpen + 0.08 * thinkingLift,
+    0,
+    0.03 * listeningFold + 0.08 * thinkingLift,
+    10,
   );
   applyRotation(
     bindings.rightUpperArmBone,
-    0.66 * greetingWeight + 0.14 * speakingOpen,
-    0.03 * speakingSwing,
-    -0.08 * speakingSwing - 0.06 * listeningFold,
+    delta,
+    rightArmLift + 0.05 * speakingOpen,
+    0.01 * speakingEmphasis,
+    -0.03 * listeningFold - 0.04 * greetingRaise,
+    10,
   );
   applyRotation(
     bindings.leftForearmBone,
-    -0.08 * speakingSwing - 0.06 * listeningFold,
+    delta,
+    -0.02 * listeningFold - 0.22 * thinkingLift,
     0,
-    0.04 * speakingOpen,
+    0.02 * speakingOpen + 0.05 * thinkingLift,
+    11,
   );
   applyRotation(
     bindings.rightForearmBone,
-    0.4 * greetingWeight + 0.16 * greetingWave + 0.08 * speakingSwing - 0.04 * listeningFold,
+    delta,
+    0.2 * greetingRaise + 0.05 * greetingWave + 0.08 * closingWeight,
     0,
-    -0.02 * speakingOpen,
+    rightWave,
+    11,
   );
-  applyRotation(bindings.leftHandBone, 0, 0, -0.04 * speakingSwing);
-  applyRotation(bindings.rightHandBone, 0, 0, 0.14 * greetingWave + 0.05 * speakingSwing);
+  applyRotation(bindings.leftHandBone, delta, 0.015 * thinkingLift, 0, 0.02 * thinkingLift, 12);
+  applyRotation(bindings.rightHandBone, delta, 0, 0, 0.06 * greetingWave + 0.04 * closingWeight, 12);
 
   return {
     position: [
-      0.02 * idleSway * (idleWeight * 0.8 + speakingWeight * 0.35),
-      0.012 * Math.max(0, breathe) + 0.014 * speechLift * speakingWeight + 0.02 * greetingWeight - 0.008 * settleWeight,
       0,
+      0.006 * Math.max(0, breathe) +
+        0.006 * speakingEmphasis +
+        0.012 * greetingRaise -
+        0.008 * settleWeight -
+        0.008 * errorWeight,
+      0.006 * attentiveWeight,
     ],
     rotation: [
-      0.008 * breathe + 0.022 * listeningWeight + 0.028 * userSpeakingWeight + 0.012 * speechLift * speakingWeight + 0.02 * greetingWeight - 0.02 * settleWeight,
+      0.006 * attentiveWeight +
+        0.008 * speakingEmphasis +
+        0.012 * greetingRaise +
+        0.008 * openingWeight -
+        0.008 * settleWeight -
+        0.01 * errorWeight,
       0,
-      0.008 * idleSway,
+      0,
     ],
   };
 }

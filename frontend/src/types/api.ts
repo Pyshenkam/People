@@ -1,4 +1,5 @@
 export type ModelFamily = "O" | "O2.0" | "SC" | "SC2.0";
+export type PlaybackTone = "panda_warm";
 
 export interface LocationConfig {
   city: string;
@@ -18,6 +19,7 @@ export interface MuseumConfig {
   model_family: ModelFamily;
   model?: string | null;
   speaker: string;
+  playback_tone: PlaybackTone;
   bot_name: string;
   system_role: string;
   speaking_style: string;

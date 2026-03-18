@@ -76,6 +76,16 @@ a {
   letter-spacing: 0.04em;
 }
 
+.eyebrow {
+  display: inline-flex;
+  margin-bottom: 14px;
+  color: var(--accent-strong) !important;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
 .visitor-stage-shell {
   position: relative;
   height: 100vh;
@@ -348,6 +358,12 @@ a {
   padding: 28px;
 }
 
+.admin-login-card .ant-card-body {
+  display: grid;
+  gap: 10px;
+  padding: 34px 32px 32px;
+}
+
 .admin-header {
   display: flex;
   justify-content: space-between;
@@ -376,6 +392,10 @@ a {
   gap: 12px 18px;
 }
 
+.form-grid__full {
+  grid-column: 1 / -1;
+}
+
 .published-summary {
   display: grid;
   gap: 12px;
@@ -384,6 +404,250 @@ a {
 
 .published-summary p {
   margin: 0;
+}
+
+.admin-form-section {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-form-section + .admin-form-section {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(116, 212, 255, 0.14);
+}
+
+.admin-form-section__head {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-form-section__head .ant-typography {
+  margin: 0;
+}
+
+.admin-form-section__head .ant-typography.ant-typography-secondary,
+.admin-form-section__head .ant-typography,
+.admin-form-section__head p {
+  color: var(--muted) !important;
+}
+
+.admin-form-section__head h5.ant-typography {
+  color: var(--text) !important;
+}
+
+.speaker-field-extra {
+  display: grid;
+  gap: 4px;
+}
+
+.speaker-field-code {
+  font-family: "Consolas", "SFMono-Regular", ui-monospace, monospace;
+  font-size: 0.84rem;
+  letter-spacing: 0.01em;
+  word-break: break-all;
+}
+
+.admin-shell .ant-card,
+.admin-page .ant-card,
+.admin-shell .ant-typography,
+.admin-page .ant-typography,
+.admin-shell .ant-form-item-label > label,
+.admin-page .ant-form-item-label > label,
+.admin-page .ant-space,
+.admin-page .ant-table-wrapper,
+.admin-page .ant-empty-description {
+  color: var(--text) !important;
+}
+
+.admin-shell .ant-typography-secondary,
+.admin-page .ant-typography-secondary,
+.admin-shell .ant-form-item-extra,
+.admin-page .ant-form-item-extra {
+  color: var(--muted) !important;
+}
+
+.admin-shell .ant-form-item-explain-error,
+.admin-page .ant-form-item-explain-error {
+  color: #ffb6be;
+}
+
+.admin-login-card,
+.admin-card {
+  background:
+    linear-gradient(180deg, rgba(10, 21, 37, 0.96), rgba(6, 13, 24, 0.92)),
+    radial-gradient(circle at top, rgba(103, 223, 255, 0.12), transparent 38%);
+}
+
+.admin-page .ant-card-head {
+  border-bottom: 1px solid rgba(116, 212, 255, 0.18);
+  color: var(--text);
+}
+
+.admin-page .ant-card-head-title {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.admin-shell .ant-input,
+.admin-shell .ant-input-affix-wrapper,
+.admin-page .ant-input,
+.admin-page .ant-input-affix-wrapper,
+.admin-page .ant-input-number,
+.admin-page .ant-input-number-input,
+.admin-page .ant-select-selector,
+.admin-page .ant-input-textarea textarea {
+  color: var(--text) !important;
+  background: rgba(7, 16, 30, 0.88) !important;
+  border-color: rgba(116, 212, 255, 0.28) !important;
+}
+
+.admin-shell .ant-input-affix-wrapper input,
+.admin-page .ant-input-affix-wrapper input {
+  color: var(--text) !important;
+  background: transparent !important;
+}
+
+.admin-shell .ant-input::placeholder,
+.admin-shell .ant-input-affix-wrapper input::placeholder,
+.admin-page .ant-input::placeholder,
+.admin-page .ant-input-affix-wrapper input::placeholder,
+.admin-page .ant-input-number-input::placeholder,
+.admin-page .ant-input-textarea textarea::placeholder {
+  color: rgba(146, 165, 191, 0.82) !important;
+}
+
+.admin-shell .ant-input-affix-wrapper:hover,
+.admin-page .ant-input:hover,
+.admin-page .ant-input-affix-wrapper:hover,
+.admin-page .ant-input-number:hover,
+.admin-page .ant-select:not(.ant-select-disabled):hover .ant-select-selector,
+.admin-page .ant-input-textarea textarea:hover {
+  border-color: rgba(143, 230, 255, 0.54) !important;
+}
+
+.admin-shell .ant-input-affix-wrapper-focused,
+.admin-page .ant-input-affix-wrapper-focused,
+.admin-page .ant-input:focus,
+.admin-page .ant-input-focused,
+.admin-page .ant-input-number-focused,
+.admin-page .ant-select-focused .ant-select-selector,
+.admin-page .ant-input-textarea textarea:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px rgba(103, 223, 255, 0.16) !important;
+}
+
+.admin-shell .ant-input-password-icon,
+.admin-page .ant-input-password-icon,
+.admin-page .ant-select-arrow,
+.admin-page .ant-input-number-handler-wrap {
+  color: rgba(197, 225, 255, 0.72) !important;
+}
+
+.admin-page .ant-select-selection-item {
+  color: var(--text) !important;
+}
+
+.admin-page .ant-select-selection-placeholder {
+  color: rgba(146, 165, 191, 0.82) !important;
+}
+
+.admin-shell .ant-btn-primary,
+.admin-page .ant-btn-primary {
+  border: 0;
+  color: #04111d !important;
+  font-weight: 800;
+  background: linear-gradient(180deg, #71e5ff, #58cbff) !important;
+  box-shadow: 0 18px 44px rgba(62, 172, 255, 0.18);
+}
+
+.admin-shell .ant-btn-primary:not(:disabled):hover,
+.admin-page .ant-btn-primary:not(:disabled):hover {
+  color: #04111d !important;
+  background: linear-gradient(180deg, #88ebff, #67dfff) !important;
+}
+
+.admin-page .ant-btn-default {
+  border-color: rgba(116, 212, 255, 0.26);
+  color: var(--text);
+  background: rgba(9, 17, 31, 0.84);
+}
+
+.admin-page .ant-btn-default:not(:disabled):hover {
+  border-color: rgba(143, 230, 255, 0.58) !important;
+  color: var(--accent-strong) !important;
+  background: rgba(13, 24, 42, 0.94) !important;
+}
+
+.admin-shell .ant-alert,
+.admin-page .ant-alert {
+  border-color: rgba(255, 105, 120, 0.26);
+  background: rgba(53, 13, 22, 0.58);
+}
+
+.admin-page .ant-switch {
+  background: rgba(98, 126, 163, 0.56);
+}
+
+.admin-page .ant-switch.ant-switch-checked {
+  background: linear-gradient(180deg, #7ae9ff, #53cbff);
+}
+
+.admin-page .ant-table-wrapper .ant-table {
+  color: var(--text);
+  background: transparent;
+}
+
+.admin-page .ant-table-wrapper .ant-table-container {
+  border: 1px solid rgba(116, 212, 255, 0.18);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.admin-page .ant-table-wrapper .ant-table-thead > tr > th {
+  background: rgba(9, 18, 32, 0.96);
+  color: var(--text);
+  border-bottom: 1px solid rgba(116, 212, 255, 0.18);
+}
+
+.admin-page .ant-table-wrapper .ant-table-tbody > tr > td {
+  background: rgba(7, 16, 30, 0.7);
+  color: var(--text);
+  border-bottom: 1px solid rgba(116, 212, 255, 0.1);
+}
+
+.admin-page .ant-table-wrapper .ant-table-tbody > tr.ant-table-row:hover > td {
+  background: rgba(12, 25, 43, 0.94);
+}
+
+.admin-select-dropdown {
+  padding: 6px;
+  background: #091421;
+  border: 1px solid rgba(116, 212, 255, 0.22);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34);
+}
+
+.admin-select-dropdown .ant-select-item {
+  color: var(--text);
+  border-radius: 12px;
+}
+
+.admin-select-dropdown .ant-select-item-option-content {
+  color: var(--text) !important;
+}
+
+.admin-select-dropdown .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
+  background: rgba(103, 223, 255, 0.12);
+}
+
+.admin-select-dropdown
+  .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+  color: var(--text);
+  background: rgba(103, 223, 255, 0.18);
+}
+
+.admin-select-dropdown .ant-empty-description {
+  color: var(--muted) !important;
 }
 
 @media (max-width: 1120px) {
