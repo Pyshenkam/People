@@ -17,3 +17,12 @@ def test_config_store_publish_flow(tmp_path: Path) -> None:
     history = store.list_published()
     assert history[0].version == published.version
     assert history[1].version == original.version
+
+
+def test_config_store_migrates_legacy_avatar_url(tmp_path: Path) -> None:
+    store = ConfigStore(tmp_path / "museum.db")
+    store.initialize(MuseumConfig(avatar_url="/models/default-avatar.glb"), "hash")
+    store.initialize(MuseumConfig(avatar_url="/models/panda-v2.glb"), "hash")
+
+    assert store.get_draft().config.avatar_url == "/models/panda-v2.glb"
+    assert store.get_published().config.avatar_url == "/models/panda-v2.glb"

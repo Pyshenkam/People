@@ -31,7 +31,7 @@ D:\DeLu\question\start-local.bat
 
 这个脚本会：
 
-- 复制默认 GLB 到 `frontend/public/models/default-avatar.glb`
+- 使用仓库内唯一的熊猫模型 `frontend/public/models/panda-v2.glb`
 - 安装后端和前端依赖
 - 从 `backend/.env.local` 读取本机火山实时语音配置
 - 构建前端并在 `4800` 端口启动后端

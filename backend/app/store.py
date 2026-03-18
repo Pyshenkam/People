@@ -9,12 +9,72 @@ from typing import Iterator
 
 from .schemas import ConfigHistoryItem, ConfigSnapshot, DraftSnapshot, MuseumConfig
 
+LEGACY_AVATAR_URLS = {None, "", "/models/default-avatar.glb"}
+
 def utcnow() -> datetime:
     return datetime.now(UTC)
 
 class ConfigStore:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
+
+    @staticmethod
+    def _normalize_avatar_url(config: MuseumConfig, default_avatar_url: str | None) -> MuseumConfig:
+        if not default_avatar_url or config.avatar_url not in LEGACY_AVATAR_URLS:
+            return config
+        payload = config.model_dump(mode="python")
+        payload["avatar_url"] = default_avatar_url
+        return MuseumConfig.model_validate(payload)
+
+    def _upgrade_existing_avatar_url(self, conn: sqlite3.Connection, default_avatar_url: str | None, now: str) -> None:
+        if not default_avatar_url:
+            return
+
+        draft_row = conn.execute(
+            "SELECT payload_json, updated_by FROM draft_config WHERE id = 1"
+        ).fetchone()
+        if draft_row is not None:
+            current_draft = MuseumConfig.model_validate_json(draft_row["payload_json"])
+            updated_draft = self._normalize_avatar_url(current_draft, default_avatar_url)
+            if updated_draft.avatar_url != current_draft.avatar_url:
+                conn.execute(
+                    """
+                    UPDATE draft_config
+                    SET payload_json = ?, updated_at = ?, updated_by = ?
+                    WHERE id = 1
+                    """,
+                    (
+                        json.dumps(updated_draft.model_dump(mode="json"), ensure_ascii=False),
+                        now,
+                        draft_row["updated_by"] or "system",
+                    ),
+                )
+
+        published_row = conn.execute(
+            """
+            SELECT version, payload_json, published_by
+            FROM config_versions
+            ORDER BY version DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if published_row is not None:
+            current_published = MuseumConfig.model_validate_json(published_row["payload_json"])
+            updated_published = self._normalize_avatar_url(current_published, default_avatar_url)
+            if updated_published.avatar_url != current_published.avatar_url:
+                conn.execute(
+                    """
+                    UPDATE config_versions
+                    SET payload_json = ?, published_at = ?, published_by = ?
+                    WHERE version = ?
+                    """,
+                    (
+                        json.dumps(updated_published.model_dump(mode="json"), ensure_ascii=False),
+                        now,
+                        published_row["published_by"] or "system",
+                        int(published_row["version"]),
+                    ),
+                )
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -29,6 +89,7 @@ class ConfigStore:
 
     def initialize(self, default_config: MuseumConfig, password_hash: str) -> None:
         now = utcnow().isoformat()
+        default_config = self._normalize_avatar_url(default_config, default_config.avatar_url)
         payload = json.dumps(default_config.model_dump(mode="json"), ensure_ascii=False)
         with self.connect() as conn:
             conn.executescript(
@@ -96,6 +157,8 @@ class ConfigStore:
                     """,
                     (payload, now, "system"),
                 )
+
+            self._upgrade_existing_avatar_url(conn, default_config.avatar_url, now)
 
     def get_admin_password_hash(self) -> str:
         with self.connect() as conn:

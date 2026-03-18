@@ -40,7 +40,7 @@ class Settings:
         upstream_app_id = os.getenv("UPSTREAM_APP_ID", "")
         upstream_access_key = os.getenv("UPSTREAM_ACCESS_KEY", "")
         upstream_mode = os.getenv("UPSTREAM_MODE", "")
-        default_avatar_url = os.getenv("DEFAULT_AVATAR_URL") or None
+        default_avatar_url = os.getenv("DEFAULT_AVATAR_URL", "/models/panda-v2.glb") or None
         if not upstream_mode:
             upstream_mode = "volcengine" if upstream_app_id and upstream_access_key else "mock"
 

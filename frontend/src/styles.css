@@ -98,16 +98,16 @@ a {
 
 .visitor-stage-shell::before {
   background:
-    radial-gradient(circle at 50% 10%, rgba(138, 222, 255, 0.12), transparent 18%),
-    linear-gradient(180deg, rgba(129, 214, 255, 0.06) 0%, rgba(16, 33, 56, 0.02) 24%, rgba(4, 9, 18, 0) 44%);
-  opacity: 0.82;
+    radial-gradient(circle at 50% 8%, rgba(116, 222, 255, 0.12), transparent 18%),
+    linear-gradient(180deg, rgba(115, 205, 255, 0.08) 0%, rgba(9, 18, 34, 0.03) 26%, rgba(4, 9, 18, 0) 48%);
+  opacity: 0.72;
 }
 
 .visitor-stage-shell::after {
   background:
-    linear-gradient(90deg, rgba(3, 8, 16, 0.72) 0%, rgba(3, 8, 16, 0.12) 12%, transparent 26%, transparent 74%, rgba(3, 8, 16, 0.12) 88%, rgba(3, 8, 16, 0.72) 100%),
-    radial-gradient(circle at 50% 86%, rgba(92, 180, 255, 0.14), transparent 24%),
-    linear-gradient(180deg, rgba(4, 9, 18, 0.02) 0%, rgba(4, 9, 18, 0.1) 56%, rgba(4, 9, 18, 0.52) 100%);
+    linear-gradient(90deg, rgba(3, 8, 16, 0.74) 0%, rgba(3, 8, 16, 0.08) 14%, transparent 24%, transparent 76%, rgba(3, 8, 16, 0.08) 86%, rgba(3, 8, 16, 0.74) 100%),
+    radial-gradient(circle at 50% 86%, rgba(86, 172, 255, 0.12), transparent 24%),
+    linear-gradient(180deg, rgba(4, 9, 18, 0.02) 0%, rgba(4, 9, 18, 0.08) 52%, rgba(4, 9, 18, 0.48) 100%);
 }
 
 .visitor-overlay {
@@ -288,11 +288,9 @@ a {
   overflow: hidden;
   z-index: 0;
   background:
-    radial-gradient(circle at 50% 14%, rgba(117, 223, 255, 0.12), transparent 20%),
-    radial-gradient(circle at 50% 62%, rgba(26, 74, 157, 0.12), transparent 28%),
-    radial-gradient(circle at 14% 42%, rgba(41, 64, 129, 0.12), transparent 24%),
-    radial-gradient(circle at 86% 36%, rgba(41, 64, 129, 0.12), transparent 24%),
-    linear-gradient(180deg, rgba(2, 8, 18, 0.98), rgba(1, 5, 12, 1));
+    radial-gradient(circle at 50% 12%, rgba(108, 216, 255, 0.08), transparent 18%),
+    radial-gradient(circle at 50% 78%, rgba(32, 70, 138, 0.08), transparent 24%),
+    linear-gradient(180deg, rgba(2, 8, 18, 0.98), rgba(1, 4, 10, 1));
 }
 
 .avatar-stage::before,
@@ -303,30 +301,22 @@ a {
 }
 
 .avatar-stage::before {
-  inset: 10% 28% 24%;
+  inset: 0;
   z-index: 1;
   background:
-    radial-gradient(circle at 50% 22%, rgba(120, 224, 255, 0.1), transparent 16%),
-    linear-gradient(180deg, rgba(112, 217, 255, 0.08) 0%, rgba(36, 87, 173, 0.04) 34%, rgba(4, 12, 25, 0) 70%);
-  filter: blur(12px);
-  opacity: 0.78;
+    radial-gradient(circle at 50% 18%, rgba(122, 223, 255, 0.08), transparent 14%),
+    radial-gradient(circle at 50% 62%, rgba(49, 96, 188, 0.08), transparent 28%);
+  filter: blur(16px);
+  opacity: 0.62;
 }
 
 .avatar-stage::after {
-  left: 50%;
-  bottom: 7%;
+  inset: auto 0 0;
   z-index: 1;
-  width: min(46vw, 620px);
-  height: min(18vh, 170px);
-  transform: translateX(-50%);
-  border-radius: 50%;
+  height: 24vh;
   background:
-    radial-gradient(ellipse at center, rgba(115, 224, 255, 0.14) 0%, rgba(44, 100, 193, 0.14) 34%, rgba(4, 12, 25, 0) 72%),
-    radial-gradient(ellipse at center, rgba(9, 22, 42, 0.72) 0%, rgba(9, 22, 42, 0) 68%);
-  box-shadow:
-    0 0 0 1px rgba(112, 210, 255, 0.08),
-    inset 0 0 48px rgba(103, 223, 255, 0.1);
-  opacity: 0.72;
+    radial-gradient(ellipse at center bottom, rgba(104, 209, 255, 0.08), rgba(24, 66, 130, 0.1) 32%, rgba(4, 12, 25, 0) 72%);
+  opacity: 0.58;
 }
 
 .avatar-stage > div,
