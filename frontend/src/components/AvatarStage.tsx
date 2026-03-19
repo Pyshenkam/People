@@ -385,14 +385,55 @@ function useRadialGlowTexture() {
   return texture;
 }
 
+function useStarSpriteTexture() {
+  const texture = useMemo(() => {
+    if (typeof document === "undefined") {
+      return null;
+    }
+
+    const size = 128;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+
+    const gradient = context.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, "rgba(255, 255, 255, 1)");
+    gradient.addColorStop(0.14, "rgba(255, 255, 255, 0.98)");
+    gradient.addColorStop(0.34, "rgba(255, 255, 255, 0.82)");
+    gradient.addColorStop(0.62, "rgba(255, 255, 255, 0.18)");
+    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, size, size);
+
+    const starTexture = new THREE.CanvasTexture(canvas);
+    starTexture.colorSpace = THREE.SRGBColorSpace;
+    starTexture.needsUpdate = true;
+    return starTexture;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      texture?.dispose();
+    };
+  }, [texture]);
+
+  return texture;
+}
+
 interface NebulaGlowProps {
   position: [number, number, number];
   scale: [number, number, number];
   color: string;
   opacity: number;
+  rotation?: number;
 }
 
-function NebulaGlow({ position, scale, color, opacity }: NebulaGlowProps) {
+function NebulaGlow({ position, scale, color, opacity, rotation = 0 }: NebulaGlowProps) {
   const texture = useRadialGlowTexture();
 
   if (!texture) {
@@ -406,6 +447,7 @@ function NebulaGlow({ position, scale, color, opacity }: NebulaGlowProps) {
         color={color}
         transparent
         opacity={opacity}
+        rotation={rotation}
         depthWrite={false}
         blending={THREE.AdditiveBlending}
         toneMapped={false}
@@ -423,6 +465,7 @@ interface ParallaxStarLayerProps {
   opacity: number;
   drift?: number;
   twinkle?: number;
+  rotationZ?: number;
 }
 
 function ParallaxStarLayer({
@@ -434,8 +477,10 @@ function ParallaxStarLayer({
   opacity,
   drift = 0.12,
   twinkle = 0.4,
+  rotationZ = 0,
 }: ParallaxStarLayerProps) {
   const pointsRef = useRef<THREE.Points>(null);
+  const texture = useStarSpriteTexture();
   const [spanX, spanY, spanZ] = span;
 
   const geometry = useMemo(() => {
@@ -468,7 +513,7 @@ function ParallaxStarLayer({
       center[1] + Math.cos(elapsed * drift * 0.24) * 0.04,
       center[2],
     );
-    pointsRef.current.rotation.z = Math.sin(elapsed * drift) * 0.018;
+    pointsRef.current.rotation.z = rotationZ + Math.sin(elapsed * drift) * 0.01;
 
     const material = pointsRef.current.material;
     if (material instanceof THREE.PointsMaterial) {
@@ -477,14 +522,21 @@ function ParallaxStarLayer({
     }
   });
 
+  if (!texture) {
+    return null;
+  }
+
   return (
     <points ref={pointsRef} geometry={geometry} position={center} frustumCulled={false}>
       <pointsMaterial
         color={color}
+        map={texture}
+        alphaMap={texture}
         size={size}
         sizeAttenuation
         transparent
         opacity={opacity}
+        alphaTest={0.02}
         depthWrite={false}
         blending={THREE.AdditiveBlending}
         toneMapped={false}
@@ -551,149 +603,228 @@ function getReactiveStageTargets(mode: StageVisualMode): ReactiveStageTargets {
   }
 }
 
-function ObservationConsole({ side, accent, floorY }: { side: -1 | 1; accent: string; floorY: number }) {
-  return (
-    <group position={[side * 4.82, floorY + 0.78, -2.76]} rotation={[0, -side * 0.68, 0]} scale={0.76}>
-      <mesh castShadow>
-        <boxGeometry args={[0.74, 1.82, 0.96]} />
-        <meshStandardMaterial
-          color="#07101a"
-          metalness={0.42}
-          roughness={0.62}
-          emissive="#07101a"
-          emissiveIntensity={0.08}
-          transparent
-          opacity={0.34}
-        />
-      </mesh>
-      <mesh position={[0, 0.08, 0.49]}>
-        <planeGeometry args={[0.46, 1.18]} />
-        <meshBasicMaterial color="#07101e" transparent opacity={0.32} />
-      </mesh>
-      <mesh position={[0, 0.16, 0.5]}>
-        <planeGeometry args={[0.11, 1.08]} />
-        <meshBasicMaterial color={accent} transparent opacity={0.42} />
-      </mesh>
-      <mesh position={[0, -0.68, 0.51]}>
-        <planeGeometry args={[0.34, 0.1]} />
-        <meshBasicMaterial color="#ffd39f" transparent opacity={0.28} />
-      </mesh>
-    </group>
-  );
-}
+const StaticCosmosBackdrop = memo(function StaticCosmosBackdrop({
+  cameraPosition,
+  cameraTarget,
+}: {
+  cameraPosition: [number, number, number];
+  cameraTarget: [number, number, number];
+}) {
+  const backdropTransform = useMemo(() => {
+    const cameraPositionVector = new THREE.Vector3(...cameraPosition);
+    const cameraTargetVector = new THREE.Vector3(...cameraTarget);
+    const forward = cameraTargetVector.clone().sub(cameraPositionVector).normalize();
+    const position = cameraTargetVector.clone().addScaledVector(forward, 12.15);
+    const anchor = new THREE.Object3D();
+    anchor.position.copy(position);
+    anchor.lookAt(cameraPositionVector);
+    anchor.updateMatrixWorld(true);
 
-const StaticCosmosBackdrop = memo(function StaticCosmosBackdrop({ floorY }: { floorY: number }) {
-  const windowCenterY = floorY + 1.16;
+    return {
+      position: [position.x, position.y, position.z] as [number, number, number],
+      quaternion: anchor.quaternion.clone(),
+    };
+  }, [
+    cameraPosition[0],
+    cameraPosition[1],
+    cameraPosition[2],
+    cameraTarget[0],
+    cameraTarget[1],
+    cameraTarget[2],
+  ]);
 
   return (
-    <group>
-      <mesh position={[0, windowCenterY + 0.08, -12.15]}>
-        <planeGeometry args={[20, 10.4]} />
-        <meshBasicMaterial color="#030814" />
+    <group position={backdropTransform.position} quaternion={backdropTransform.quaternion}>
+      <mesh position={[0, 0, 0]}>
+        <planeGeometry args={[34, 18]} />
+        <meshBasicMaterial color="#01040c" side={THREE.DoubleSide} />
       </mesh>
 
-      <NebulaGlow position={[0, windowCenterY + 0.34, -11.8]} scale={[11.8, 5.2, 1]} color="#0f1d41" opacity={0.22} />
-      <NebulaGlow position={[-2.8, windowCenterY + 0.9, -11.4]} scale={[8.4, 4.7, 1]} color="#1b4387" opacity={0.24} />
-      <NebulaGlow position={[2.55, windowCenterY + 0.02, -11.05]} scale={[6.8, 3.9, 1]} color="#2966b5" opacity={0.18} />
-      <NebulaGlow position={[0.52, windowCenterY + 1.1, -10.75]} scale={[4.8, 2.6, 1]} color="#6ee2ff" opacity={0.16} />
-      <NebulaGlow position={[-0.7, windowCenterY - 0.8, -10.6]} scale={[5.8, 3.0, 1]} color="#132149" opacity={0.14} />
-      <NebulaGlow position={[3.4, windowCenterY + 0.78, -10.9]} scale={[5.6, 2.8, 1]} color="#8adfff" opacity={0.09} />
-
-      <ParallaxStarLayer
-        center={[0, windowCenterY + 0.12, -11.1]}
-        span={[11.5, 5.2, 1.5]}
-        count={1280}
-        color="#8fb6ff"
-        size={0.052}
-        opacity={0.54}
-        drift={0.06}
-        twinkle={0.32}
-      />
-      <ParallaxStarLayer
-        center={[0.4, windowCenterY - 0.08, -10.15]}
-        span={[9.6, 4.4, 1.1]}
-        count={380}
-        color="#9ce7ff"
-        size={0.074}
-        opacity={0.62}
-        drift={0.09}
-        twinkle={0.4}
-      />
-      <ParallaxStarLayer
-        center={[0.18, windowCenterY + 0.02, -9.55]}
-        span={[8.9, 4.1, 1.05]}
-        count={340}
-        color="#e4f5ff"
-        size={0.094}
-        opacity={0.88}
-        drift={0.11}
-        twinkle={0.44}
-      />
-      <ParallaxStarLayer
-        center={[-0.2, windowCenterY + 0.2, -8.55]}
-        span={[6.2, 2.9, 0.62]}
-        count={72}
-        color={stageGlassAccent}
-        size={0.17}
-        opacity={0.98}
-        drift={0.18}
-        twinkle={0.62}
-      />
-      <ParallaxStarLayer
-        center={[1.1, windowCenterY + 0.46, -8.9]}
-        span={[7.6, 3.2, 0.78]}
-        count={96}
-        color="#ffffff"
-        size={0.21}
-        opacity={1}
-        drift={0.14}
-        twinkle={0.72}
-      />
-      <Stars radius={44} depth={12} count={680} factor={2.08} saturation={0.05} fade speed={0.1} />
-      <Sparkles count={30} scale={[10.8, 5.1, 9]} size={2.38} speed={0.12} color={stageCoolAccent} />
-      <Sparkles count={12} scale={[9.1, 3.8, 7]} size={3.35} speed={0.08} color={stageGlassAccent} />
-
-      <Cloud
-        position={[0.24, windowCenterY + 0.26, -10.35]}
-        scale={[4.7, 1.34, 1]}
-        bounds={[6.1, 1.04, 2]}
-        segments={26}
-        opacity={0.32}
-        speed={0.08}
-        color="#1b3760"
-      />
-      <Cloud
-        position={[2.2, windowCenterY - 0.04, -9.45]}
-        scale={[3.1, 0.96, 1]}
-        bounds={[4.2, 0.78, 2]}
-        segments={24}
+      <NebulaGlow position={[0.16, 0.28, 0.24]} scale={[28, 11.4, 1]} color="#06101d" opacity={0.18} />
+      <NebulaGlow
+        position={[-5.2, 2.3, 0.62]}
+        scale={[11.4, 2.9, 1]}
+        color="#163157"
         opacity={0.24}
-        speed={0.05}
-        color="#3571ab"
+        rotation={-0.3}
       />
-      <Cloud
-        position={[-2.45, windowCenterY + 0.32, -9.25]}
-        scale={[3.5, 1.08, 1]}
-        bounds={[4.4, 0.86, 2]}
-        segments={24}
-        opacity={0.2}
-        speed={0.04}
-        color="#4070ab"
+      <NebulaGlow
+        position={[-1.46, 1.26, 1.08]}
+        scale={[12.4, 2.24, 1]}
+        color="#2b548f"
+        opacity={0.26}
+        rotation={-0.24}
       />
-      <Cloud
-        position={[-0.58, windowCenterY - 0.74, -8.95]}
-        scale={[2.8, 0.86, 1]}
-        bounds={[3.3, 0.66, 2]}
-        segments={20}
-        opacity={0.15}
-        speed={0.03}
-        color="#142247"
+      <NebulaGlow
+        position={[2.04, 0.18, 1.72]}
+        scale={[10.6, 1.96, 1]}
+        color="#d7f5ff"
+        opacity={0.18}
+        rotation={-0.18}
+      />
+      <NebulaGlow
+        position={[5.6, -0.78, 2.22]}
+        scale={[9.4, 1.82, 1]}
+        color="#81d8ff"
+        opacity={0.14}
+        rotation={-0.14}
+      />
+      <NebulaGlow
+        position={[-6.2, -1.48, 1.96]}
+        scale={[8.6, 2.7, 1]}
+        color="#0f2344"
+        opacity={0.12}
+        rotation={0.08}
+      />
+      <NebulaGlow
+        position={[0.82, 2.74, 1.76]}
+        scale={[8.2, 2.6, 1]}
+        color="#1e3b68"
+        opacity={0.12}
+        rotation={-0.08}
+      />
+      <NebulaGlow
+        position={[4.9, 1.58, 1.54]}
+        scale={[6.4, 2.2, 1]}
+        color="#7bd8ff"
+        opacity={0.08}
+        rotation={-0.22}
+      />
+      <NebulaGlow
+        position={[-0.9, -2.42, 2.72]}
+        scale={[9.2, 3.1, 1]}
+        color="#0d1730"
+        opacity={0.11}
+        rotation={0.12}
       />
 
-      <mesh position={[0, windowCenterY, -6.7]}>
-        <planeGeometry args={[6.2, 3.16]} />
-        <meshPhysicalMaterial color="#4db7e0" roughness={0.08} metalness={0.1} transparent opacity={0.07} />
-      </mesh>
+      <ParallaxStarLayer
+        center={[0.12, 0.2, 0.42]}
+        span={[28, 14.8, 3.8]}
+        count={3000}
+        color="#95a8c7"
+        size={0.022}
+        opacity={0.16}
+        drift={0.026}
+        twinkle={0.08}
+      />
+      <ParallaxStarLayer
+        center={[0.32, 0.06, 1.08]}
+        span={[24.6, 12.8, 2.7]}
+        count={1700}
+        color="#c2d5ee"
+        size={0.028}
+        opacity={0.22}
+        drift={0.03}
+        twinkle={0.12}
+      />
+      <ParallaxStarLayer
+        center={[-0.46, 0.96, 1.46]}
+        span={[25.8, 3.9, 1.9]}
+        count={1250}
+        color="#dbe9ff"
+        size={0.032}
+        opacity={0.3}
+        drift={0.042}
+        twinkle={0.18}
+        rotationZ={-0.22}
+      />
+      <ParallaxStarLayer
+        center={[0.92, 0.28, 2.12]}
+        span={[20.8, 2.7, 1.1]}
+        count={460}
+        color="#f4f9ff"
+        size={0.062}
+        opacity={0.46}
+        drift={0.06}
+        twinkle={0.22}
+        rotationZ={-0.22}
+      />
+      <ParallaxStarLayer
+        center={[1.82, -0.18, 2.96]}
+        span={[17.4, 2.1, 0.82]}
+        count={128}
+        color="#fff6de"
+        size={0.106}
+        opacity={0.68}
+        drift={0.096}
+        twinkle={0.34}
+        rotationZ={-0.2}
+      />
+      <ParallaxStarLayer
+        center={[-1.1, 2.52, 1.84]}
+        span={[21.2, 3.6, 1.4]}
+        count={420}
+        color={stageGlassAccent}
+        size={0.034}
+        opacity={0.18}
+        drift={0.048}
+        twinkle={0.16}
+      />
+      <ParallaxStarLayer
+        center={[1.42, -2.46, 2.46]}
+        span={[20.8, 3.3, 1.5]}
+        count={340}
+        color="#c0d2eb"
+        size={0.034}
+        opacity={0.16}
+        drift={0.038}
+        twinkle={0.12}
+      />
+      <NebulaGlow position={[-7, 2.72, 3.42]} scale={[0.34, 0.34, 1]} color="#fff0d9" opacity={0.9} />
+      <NebulaGlow position={[-3.2, 1.72, 3.56]} scale={[0.4, 0.4, 1]} color="#8fe7ff" opacity={0.86} />
+      <NebulaGlow position={[1.3, 0.72, 3.7]} scale={[0.44, 0.44, 1]} color="#ffffff" opacity={0.9} />
+      <NebulaGlow position={[5.8, -0.68, 3.62]} scale={[0.38, 0.38, 1]} color="#fff7e8" opacity={0.84} />
+      <NebulaGlow position={[8.2, 2.12, 3.36]} scale={[0.28, 0.28, 1]} color="#8ecfff" opacity={0.8} />
+      <Stars radius={84} depth={24} count={4200} factor={1.72} saturation={0} fade speed={0.12} />
+      <Sparkles count={12} scale={[19.2, 10.2, 10.4]} size={1.48} speed={0.04} color="#dceeff" />
+      <Sparkles count={6} scale={[16.8, 8.2, 8.2]} size={2.02} speed={0.03} color={stageGlassAccent} />
+
+      <Cloud
+        position={[-4.2, 1.82, 1.76]}
+        scale={[4.6, 0.9, 1]}
+        bounds={[5.2, 0.78, 2]}
+        segments={26}
+        opacity={0.14}
+        speed={0.04}
+        color="#29446d"
+      />
+      <Cloud
+        position={[-0.12, 0.82, 2.18]}
+        scale={[5.4, 1, 1]}
+        bounds={[6.2, 0.86, 2]}
+        segments={24}
+        opacity={0.16}
+        speed={0.03}
+        color="#4a73ae"
+      />
+      <Cloud
+        position={[3.6, -0.08, 2.72]}
+        scale={[4.2, 0.92, 1]}
+        bounds={[4.8, 0.74, 2]}
+        segments={24}
+        opacity={0.13}
+        speed={0.03}
+        color="#7cbcf0"
+      />
+      <Cloud
+        position={[6.8, -1.24, 3.04]}
+        scale={[3.4, 0.84, 1]}
+        bounds={[4, 0.66, 2]}
+        segments={20}
+        opacity={0.1}
+        speed={0.025}
+        color="#d8efff"
+      />
+      <Cloud
+        position={[-1.2, -2.38, 3.28]}
+        scale={[5.2, 1.16, 1]}
+        bounds={[6, 0.9, 2]}
+        segments={20}
+        opacity={0.08}
+        speed={0.03}
+        color="#101b34"
+      />
     </group>
   );
 });
@@ -889,9 +1020,6 @@ const ReactiveStageLayer = memo(function ReactiveStageLayer({
         />
       </mesh>
 
-      <ObservationConsole side={-1} accent={stageCoolAccent} floorY={floorY} />
-      <ObservationConsole side={1} accent={stageCoolAccent} floorY={floorY} />
-
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, floorY, -0.02]} receiveShadow>
         <circleGeometry args={[3.12, 72]} />
         <MeshReflectorMaterial
@@ -926,9 +1054,9 @@ const ReactiveStageLayer = memo(function ReactiveStageLayer({
 const ScenePostFx = memo(function ScenePostFx() {
   return (
     <EffectComposer>
-      <Bloom mipmapBlur intensity={0.72} luminanceThreshold={0.12} luminanceSmoothing={0.42} />
-      <Noise opacity={0.028} />
-      <Vignette eskil={false} offset={0.16} darkness={0.88} />
+      <Bloom mipmapBlur intensity={0.68} luminanceThreshold={0.18} luminanceSmoothing={0.46} />
+      <Noise opacity={0.018} />
+      <Vignette eskil={false} offset={0.18} darkness={0.84} />
     </EffectComposer>
   );
 });
@@ -1022,17 +1150,17 @@ export const AvatarStage = memo(function AvatarStage({
   return (
     <div className="avatar-stage">
       <Canvas camera={{ position: preset.cameraPosition, fov: preset.cameraFov }} shadows dpr={[1, 2]}>
-        <color attach="background" args={["#020611"]} />
-        <fog attach="fog" args={["#020611", 10.8, 24]} />
+        <color attach="background" args={["#01040c"]} />
+        <fog attach="fog" args={["#01040c", 15.4, 36]} />
         <CameraRig target={preset.cameraTarget} />
-        <ambientLight intensity={0.42} />
-        <hemisphereLight intensity={0.56} groundColor="#010409" color="#b4e3ff" />
+        <ambientLight intensity={0.38} />
+        <hemisphereLight intensity={0.5} groundColor="#010409" color="#b4e3ff" />
         <directionalLight position={[0.3, 3.8, 3.5]} intensity={1.6} castShadow color="#eef6ff" />
-        <spotLight position={[0, 4.8, 2.2]} intensity={24} angle={0.36} penumbra={0.92} color="#f1f8ff" />
+        <spotLight position={[0, 4.8, 2.2]} intensity={18} angle={0.33} penumbra={0.92} color="#f1f8ff" />
         <Suspense fallback={null}>
           <StaticStageEnvironment />
         </Suspense>
-        <StaticCosmosBackdrop floorY={preset.floorY} />
+        <StaticCosmosBackdrop cameraPosition={preset.cameraPosition} cameraTarget={preset.cameraTarget} />
         <ReactiveStageLayer floorY={preset.floorY} mode={stageVisualMode} />
         <AvatarActor avatarUrl={avatarUrl} level={level} phase={phase} preset={preset} />
         <ContactShadows

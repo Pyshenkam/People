@@ -93,55 +93,62 @@ function createPlaybackChain(
   if (effectiveTone === "panda_warm") {
     const lowShelf = context.createBiquadFilter();
     lowShelf.type = "lowshelf";
-    lowShelf.frequency.value = 180;
-    lowShelf.gain.value = 3.4;
+    lowShelf.frequency.value = 165;
+    lowShelf.gain.value = 2.2;
 
     const lowBodyBoost = context.createBiquadFilter();
     lowBodyBoost.type = "peaking";
-    lowBodyBoost.frequency.value = 320;
-    lowBodyBoost.Q.value = 0.88;
-    lowBodyBoost.gain.value = 2.4;
+    lowBodyBoost.frequency.value = 300;
+    lowBodyBoost.Q.value = 0.9;
+    lowBodyBoost.gain.value = 1.6;
 
     const lowMidBoost = context.createBiquadFilter();
     lowMidBoost.type = "peaking";
-    lowMidBoost.frequency.value = 500;
-    lowMidBoost.Q.value = 0.62;
-    lowMidBoost.gain.value = 4;
+    lowMidBoost.frequency.value = 420;
+    lowMidBoost.Q.value = 0.68;
+    lowMidBoost.gain.value = 2.6;
+
+    const presenceLift = context.createBiquadFilter();
+    presenceLift.type = "peaking";
+    presenceLift.frequency.value = 1800;
+    presenceLift.Q.value = 0.92;
+    presenceLift.gain.value = 1.6;
 
     const presenceCut = context.createBiquadFilter();
     presenceCut.type = "peaking";
     presenceCut.frequency.value = 3000;
     presenceCut.Q.value = 1;
-    presenceCut.gain.value = -3.2;
+    presenceCut.gain.value = -1.8;
 
     const highShelfCut = context.createBiquadFilter();
     highShelfCut.type = "highshelf";
-    highShelfCut.frequency.value = 3200;
-    highShelfCut.gain.value = -5.8;
+    highShelfCut.frequency.value = 3600;
+    highShelfCut.gain.value = -3.8;
 
     const highSoftener = context.createBiquadFilter();
     highSoftener.type = "lowpass";
-    highSoftener.frequency.value = 3600;
-    highSoftener.Q.value = 0.72;
+    highSoftener.frequency.value = 4300;
+    highSoftener.Q.value = 0.7;
 
     const compressor = context.createDynamicsCompressor();
-    compressor.threshold.value = -24;
-    compressor.knee.value = 14;
-    compressor.ratio.value = 3.4;
+    compressor.threshold.value = -22;
+    compressor.knee.value = 12;
+    compressor.ratio.value = 3;
     compressor.attack.value = 0.005;
-    compressor.release.value = 0.2;
+    compressor.release.value = 0.18;
 
     const saturator = context.createWaveShaper();
-    saturator.curve = createSoftClipCurve(0.32);
+    saturator.curve = createSoftClipCurve(0.22);
     saturator.oversample = "4x";
 
     const makeupGain = context.createGain();
-    makeupGain.gain.value = 1.16;
+    makeupGain.gain.value = 1.08;
 
     inputNode.connect(lowShelf);
     lowShelf.connect(lowBodyBoost);
     lowBodyBoost.connect(lowMidBoost);
-    lowMidBoost.connect(presenceCut);
+    lowMidBoost.connect(presenceLift);
+    presenceLift.connect(presenceCut);
     presenceCut.connect(highShelfCut);
     highShelfCut.connect(highSoftener);
     highSoftener.connect(compressor);
@@ -158,6 +165,7 @@ function createPlaybackChain(
         lowShelf.disconnect();
         lowBodyBoost.disconnect();
         lowMidBoost.disconnect();
+        presenceLift.disconnect();
         presenceCut.disconnect();
         highShelfCut.disconnect();
         highSoftener.disconnect();
@@ -290,7 +298,7 @@ export async function createAudioRuntime(
       const scheduledSource = context.createBufferSource();
       scheduledSource.buffer = audioBuffer;
       scheduledSource.connect(playerInputNode);
-      const playbackRate = effectivePlaybackTone === "panda_warm" ? 0.92 : 1;
+      const playbackRate = effectivePlaybackTone === "panda_warm" ? 0.95 : 1;
       scheduledSource.playbackRate.value = playbackRate;
 
       const startAt = Math.max(context.currentTime + playbackLeadTimeSec, bufferedUntil);

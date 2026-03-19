@@ -119,5 +119,13 @@
   - Confirmed the background/stage color system was still tied to `phase` in `AvatarStage.tsx`, so listening/speaking state changes were recoloring light bars, sparkles, side panels, and stage lighting.
   - Replaced those phase-driven backdrop accents with fixed stage constants (`stageCoolAccent`, `stageWarmAccent`, `stageGlassAccent`) so the environment now stays visually stable while only the avatar motion changes.
   - Simplified `ObservationWindowBackdrop` to remove its `phase` dependency entirely; `StageEnvironment` and the extra spotlights now receive fixed accent values from `AvatarStage`.
-  - Validation:
-    - `frontend`: `npm run build` passed after freezing the stage accents.
+- Validation:
+  - `frontend`: `npm run build` passed after freezing the stage accents.
+
+2026-03-19
+- User asked to avoid Playwright and continue refining the space background visually by code inspection + local build only.
+- Reworked `frontend/src/components/AvatarStage.tsx` star rendering so `ParallaxStarLayer` now uses a radial sprite texture instead of square point primitives; this should read as round glowing stars rather than pixel blocks.
+- Broke the previous narrow horizontal star strip into a broader, camera-aligned deep-space composition with full-field dust layers plus a softer diagonal galaxy lane.
+- Enlarged the camera-facing backdrop plane and removed the small inner glass plane that was visually boxing the star band into a rectangular patch.
+- Validation:
+  - `frontend`: `npm run build` passed after the star-shape/distribution refactor.
