@@ -62,3 +62,10 @@ def test_bootstrap_defaults_preserves_existing_config(tmp_path: Path, monkeypatc
     assert current.version == published.version
     assert current.config.playback_tone == "panda_warm"
     assert current.actor == "tester"
+
+
+def test_museum_config_defaults_use_shorter_idle_timeout() -> None:
+    config = MuseumConfig()
+
+    assert config.idle_timeout_sec == 7
+    assert config.auto_end_mode == "silence_timeout"

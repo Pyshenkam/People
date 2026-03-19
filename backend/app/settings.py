@@ -48,7 +48,8 @@ class Settings:
             display_title=os.getenv("DEFAULT_DISPLAY_TITLE", "科技馆数字人"),
             display_subtitle=os.getenv("DEFAULT_DISPLAY_SUBTITLE", "点击开始对话，进入实时语音讲解"),
             avatar_url=default_avatar_url,
-            idle_timeout_sec=int(os.getenv("DEFAULT_IDLE_TIMEOUT_SEC", "60")),
+            idle_timeout_sec=int(os.getenv("DEFAULT_IDLE_TIMEOUT_SEC", "7")),
+            auto_end_mode=os.getenv("DEFAULT_AUTO_END_MODE", "silence_timeout"),  # type: ignore[arg-type]
             welcome_text=os.getenv(
                 "DEFAULT_WELCOME_TEXT",
                 "你好，欢迎来到科技馆。点击开始对话后，我会实时听你说话。",

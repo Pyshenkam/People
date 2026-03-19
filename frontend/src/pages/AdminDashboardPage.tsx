@@ -15,23 +15,15 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  ApiError,
   fetchAdminSession,
   fetchConfigBundle,
   fetchHistory,
   logoutAdmin,
   publishDraft,
   resetRealtimeSession,
-  updateDraftConfig,
 } from "../lib/api";
-import {
-  formatSpeakerDisplay,
-  getDefaultSpeakerForFamily,
-  getSpeakerMeta,
-  getSpeakerOptionsForFamily,
-  isSpeakerSupportedByFamily,
-} from "../lib/speakers";
-import { formatPlaybackTone } from "../lib/playbackTone";
-import type { ConfigBundle, ConfigHistoryItem, MuseumConfig } from "../types/api";
+import type { AutoEndMode, ConfigBundle, ConfigHistoryItem, MuseumConfig } from "../types/api";
 
 const modelFamilyOptions = [
   { value: "O", label: "O 标准对话版" },
@@ -40,14 +32,111 @@ const modelFamilyOptions = [
   { value: "SC2.0", label: "SC2.0 角色增强版" },
 ];
 
+const autoEndModeOptions: Array<{ value: AutoEndMode; label: string }> = [
+  { value: "silence_timeout", label: "静默超时自动结束" },
+  { value: "disconnect_only", label: "仅页面断开时结束" },
+];
+
+const autoEndModeLabelMap: Record<AutoEndMode, string> = {
+  silence_timeout: "静默超时自动结束",
+  disconnect_only: "仅页面断开时结束",
+};
+
+const DEFAULT_DISPLAY_TITLE = "科技馆数字人";
+const DEFAULT_DISPLAY_SUBTITLE = "点击开始对话，进入实时语音讲解";
+type FormNamePath = string | number | Array<string | number>;
+
+function buildTrimmedRequiredRule(messageText: string) {
+  return {
+    validator: async (_rule: unknown, value: unknown) => {
+      if (typeof value !== "string" || !value.trim()) {
+        throw new Error(messageText);
+      }
+    },
+  };
+}
+
+const idleTimeoutRule = {
+  validator: async (_rule: unknown, value: unknown) => {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+      throw new Error("请输入静默超时秒数。");
+    }
+
+    if (value < 5 || value > 600) {
+      throw new Error("静默超时需在 5 到 600 秒之间。");
+    }
+  },
+};
+
+function toNamePath(fieldName: string): FormNamePath {
+  return fieldName.includes(".") ? fieldName.split(".") : fieldName;
+}
+
+function buildPromptSummary(config: MuseumConfig): Array<{ label: string; text: string }> {
+  if (config.model_family === "SC" || config.model_family === "SC2.0") {
+    return [
+      {
+        label: "当前角色设定",
+        text: config.character_manifest ?? "未设置",
+      },
+    ];
+  }
+
+  return [
+    {
+      label: "当前讲解角色设定",
+      text: config.system_role,
+    },
+    {
+      label: "当前回答风格",
+      text: config.speaking_style,
+    },
+  ];
+}
+
 export function AdminDashboardPage() {
   const navigate = useNavigate();
-  const [form] = Form.useForm<MuseumConfig>();
+  const [form] = Form.useForm();
   const [csrfToken, setCsrfToken] = useState("");
   const [bundle, setBundle] = useState<ConfigBundle | null>(null);
   const [history, setHistory] = useState<ConfigHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const currentFamily = Form.useWatch("model_family", form) ?? "O2.0";
+  const currentAutoEndMode = Form.useWatch("auto_end_mode", form) ?? "silence_timeout";
+
+  const clearFieldErrors = () => {
+    const fields = form
+      .getFieldsError()
+      .filter((field) => field.errors.length > 0)
+      .map((field) => ({
+        name: field.name,
+        errors: [] as string[],
+      }));
+
+    if (fields.length > 0) {
+      form.setFields(fields);
+    }
+  };
+
+  const applyFieldErrors = (fieldErrors: Record<string, string[]>) => {
+    const entries = Object.entries(fieldErrors);
+    if (entries.length === 0) {
+      return false;
+    }
+
+    form.setFields(
+      entries.map(([fieldName, errors]) => ({
+        name: toNamePath(fieldName),
+        errors,
+      })),
+    );
+
+    form.scrollToField(toNamePath(entries[0][0]));
+    return true;
+  };
 
   const refresh = async () => {
     setLoading(true);
@@ -59,14 +148,18 @@ export function AdminDashboardPage() {
         void navigate("/admin/login", { replace: true });
         return;
       }
+
       const [configBundle, configHistory] = await Promise.all([fetchConfigBundle(), fetchHistory()]);
       setBundle(configBundle);
       setHistory(configHistory);
+      clearFieldErrors();
+
       form.setFieldsValue({
-        ...configBundle.draft.config,
+        ...configBundle.published.config,
         playback_tone: "panda_warm",
       });
-      if (!configBundle.draft.config.avatar_url) {
+
+      if (!configBundle.published.config.avatar_url) {
         form.setFieldValue("avatar_url", "/models/panda-v2.glb");
       }
     } catch (requestError) {
@@ -80,29 +173,54 @@ export function AdminDashboardPage() {
     void refresh();
   }, []);
 
-  const currentFamily = Form.useWatch("model_family", form);
-  const currentSpeaker = Form.useWatch("speaker", form);
-  const safeFamily = currentFamily ?? "O2.0";
-  const availableSpeakerOptions = getSpeakerOptionsForFamily(safeFamily);
-  const selectedSpeakerMeta = getSpeakerMeta(currentSpeaker);
-
-  const buildConfigPayload = (overrides?: Partial<MuseumConfig>): MuseumConfig => {
-    const merged = {
-      ...form.getFieldsValue(true),
-      ...overrides,
-    } as Partial<MuseumConfig>;
-
+  const buildConfigPayload = (values: MuseumConfig): MuseumConfig => {
+    const publishedConfig = bundle?.published.config;
     return {
-      ...merged,
+      ...(publishedConfig ?? values),
+      ...values,
+      bot_name: values.bot_name?.trim() || publishedConfig?.bot_name || "",
+      welcome_text: values.welcome_text?.trim() || publishedConfig?.welcome_text || "",
+      system_role: values.system_role?.trim() || publishedConfig?.system_role || "",
+      speaking_style: values.speaking_style?.trim() || publishedConfig?.speaking_style || "",
+      character_manifest: values.character_manifest?.trim() || null,
+      display_title: values.display_title?.trim() || publishedConfig?.display_title || DEFAULT_DISPLAY_TITLE,
+      display_subtitle:
+        values.display_subtitle?.trim() || publishedConfig?.display_subtitle || DEFAULT_DISPLAY_SUBTITLE,
+      avatar_url: values.avatar_url ?? publishedConfig?.avatar_url ?? "/models/panda-v2.glb",
       playback_tone: "panda_warm",
-    } as MuseumConfig;
+    };
   };
 
-  useEffect(() => {
-    if (!isSpeakerSupportedByFamily(currentSpeaker, safeFamily)) {
-      form.setFieldValue("speaker", getDefaultSpeakerForFamily(safeFamily));
+  const handlePublish = async (values: MuseumConfig) => {
+    setPublishing(true);
+    clearFieldErrors();
+
+    try {
+      await publishDraft(csrfToken, buildConfigPayload(values));
+      message.success("发布成功，新配置将在下一次会话生效。");
+      await refresh();
+    } catch (requestError) {
+      if (requestError instanceof ApiError) {
+        applyFieldErrors(requestError.fieldErrors);
+        message.error(requestError.message);
+      } else {
+        message.error(requestError instanceof Error ? requestError.message : "发布失败，请稍后再试。");
+      }
+    } finally {
+      setPublishing(false);
     }
-  }, [currentSpeaker, form, safeFamily]);
+  };
+
+  const handleFinishFailed = ({
+    errorFields,
+  }: {
+    errorFields: Array<{ name: Array<string | number> }>;
+  }) => {
+    if (errorFields.length > 0) {
+      form.scrollToField(errorFields[0].name);
+    }
+    message.error("发布失败，请先检查标红字段。");
+  };
 
   return (
     <main className="admin-page">
@@ -111,7 +229,7 @@ export function AdminDashboardPage() {
           <Typography.Text className="eyebrow">ADMIN CONSOLE</Typography.Text>
           <Typography.Title level={2}>数字人后台配置</Typography.Title>
           <Typography.Paragraph>
-            草稿保存后不会影响当前访客。只有点击发布后，下一次访客开始对话时才会生效，熊猫讲解音色也会随发布版本一起切换。
+            当前页面展示的是已发布配置。点击“发布配置”后，新配置会在下一次访客会话生效；如需立即验证，请先结束当前会话。
           </Typography.Paragraph>
         </div>
         <Space>
@@ -127,10 +245,10 @@ export function AdminDashboardPage() {
             danger
             onClick={async () => {
               await resetRealtimeSession(csrfToken);
-              message.success("已尝试关闭当前访客会话");
+              message.success("已尝试结束当前会话。");
             }}
           >
-            重置当前会话
+            结束当前会话
           </Button>
         </Space>
       </header>
@@ -138,95 +256,66 @@ export function AdminDashboardPage() {
       {error ? <Alert type="error" showIcon message={error} /> : null}
 
       <div className="admin-grid">
-        <Card loading={loading} title="草稿配置" className="admin-card">
-          <Form
-            layout="vertical"
-            form={form}
-            onFinish={async (values) => {
-              try {
-                await updateDraftConfig(buildConfigPayload(values), csrfToken);
-                message.success("草稿已保存");
-                await refresh();
-              } catch (requestError) {
-                message.error(requestError instanceof Error ? requestError.message : "保存失败");
-              }
-            }}
-          >
-            <section className="admin-form-section">
-              <div className="admin-form-section__head">
-                <Typography.Title level={5}>展示给访客的内容</Typography.Title>
-                <Typography.Paragraph>
-                  这里只保留现场会改的内容，熊猫模型路径等技术项已隐藏。
-                </Typography.Paragraph>
-              </div>
-              <div className="form-grid">
-                <Form.Item label="展示标题" name="display_title" rules={[{ required: true }]}>
-                  <Input />
-                </Form.Item>
-                <Form.Item label="展示副标题" name="display_subtitle" rules={[{ required: true }]}>
-                  <Input />
-                </Form.Item>
-                <Form.Item label="欢迎语" name="welcome_text" rules={[{ required: true }]}>
-                  <Input.TextArea rows={4} />
-                </Form.Item>
-                <Form.Item label="空闲超时（秒）" name="idle_timeout_sec" rules={[{ required: true }]}>
-                  <InputNumber min={15} max={600} style={{ width: "100%" }} />
-                </Form.Item>
-              </div>
-            </section>
+        <Card loading={loading} title="发布配置" className="admin-card">
+          <Form layout="vertical" form={form} onFinish={handlePublish} onFinishFailed={handleFinishFailed}>
+            <Alert
+              className="admin-inline-alert"
+              type="info"
+              showIcon
+              message="提示词发布后不会立刻替换当前会话"
+              description="如果需要现场立即验证，请先点击右上角“结束当前会话”，再重新开始下一次会话。"
+            />
 
             <section className="admin-form-section">
               <div className="admin-form-section__head">
-                <Typography.Title level={5}>熊猫讲解设置</Typography.Title>
+                <Typography.Title level={5}>会话与角色设置</Typography.Title>
                 <Typography.Paragraph>
-                  切换模型版本时，系统会自动过滤成当前版本能用的豆包音色，访客端语音已固定为默认憨厚化。
+                  展示标题、副标题和音色已固定，不再开放编辑，避免出现“发布了但看不出变化”的情况。
                 </Typography.Paragraph>
               </div>
               <div className="form-grid">
-                <Form.Item label="角色名称" name="bot_name" rules={[{ required: true }]}>
-                  <Input />
+                <Form.Item
+                  label="角色名称"
+                  name="bot_name"
+                  rules={[buildTrimmedRequiredRule("角色名称不能为空。")]}
+                >
+                  <Input maxLength={20} placeholder="请输入角色名称" />
                 </Form.Item>
-                <Form.Item label="模型版本" name="model_family" rules={[{ required: true }]}>
+                <Form.Item label="模型版本" name="model_family" rules={[{ required: true, message: "请选择模型版本。" }]}>
                   <Select popupClassName="admin-select-dropdown" options={modelFamilyOptions} />
                 </Form.Item>
                 <Form.Item
                   className="form-grid__full"
-                  label="熊猫讲解音色"
-                  name="speaker"
-                  rules={[{ required: true }]}
+                  label="欢迎语"
+                  name="welcome_text"
+                  rules={[buildTrimmedRequiredRule("欢迎语不能为空。")]}
+                >
+                  <Input.TextArea rows={4} placeholder="请输入欢迎语" />
+                </Form.Item>
+                <Form.Item
+                  label="自动结束模式"
+                  name="auto_end_mode"
+                  rules={[{ required: true, message: "请选择自动结束模式。" }]}
+                >
+                  <Select popupClassName="admin-select-dropdown" options={autoEndModeOptions} />
+                </Form.Item>
+                <Form.Item
+                  label="静默超时（秒）"
+                  name="idle_timeout_sec"
+                  rules={[idleTimeoutRule]}
                   extra={
-                    <div className="speaker-field-extra">
-                      <span>
-                        {selectedSpeakerMeta?.description ??
-                          "根据豆包文档自动筛选当前模型版本可用的官方音色。"}
-                      </span>
-                      {selectedSpeakerMeta ? (
-                        <span className="speaker-field-code">{selectedSpeakerMeta.value}</span>
-                      ) : null}
-                    </div>
+                    currentAutoEndMode === "silence_timeout"
+                      ? "现场连续没有语音交互时，会按这个秒数自动结束。"
+                      : "当前模式不会按静默秒数结束，会保留这个值，切回静默模式后继续生效。"
                   }
                 >
-                  <Select
-                    showSearch
-                    optionFilterProp="label"
-                    popupClassName="admin-select-dropdown"
-                    notFoundContent="当前模型版本暂无可用音色"
-                    filterOption={(input, option) => {
-                      const value = String(option?.value ?? "");
-                      const label = String(option?.label ?? "");
-                      const description = getSpeakerMeta(value)?.description ?? "";
-                      const haystack = `${label} ${value} ${description}`.toLowerCase();
-                      return haystack.includes(input.trim().toLowerCase());
-                    }}
-                    options={availableSpeakerOptions.map((item) => ({
-                      value: item.value,
-                      label: item.shortLabel,
-                    }))}
+                  <InputNumber
+                    min={5}
+                    max={600}
+                    disabled={currentAutoEndMode !== "silence_timeout"}
+                    style={{ width: "100%" }}
                   />
                 </Form.Item>
-                <div className="form-grid__full speaker-field-extra">
-                  <span>声音风格已固定为默认憨厚化，访客端会直接按这个效果播放。</span>
-                </div>
               </div>
             </section>
 
@@ -234,7 +323,7 @@ export function AdminDashboardPage() {
               <div className="admin-form-section__head">
                 <Typography.Title level={5}>讲解内容设置</Typography.Title>
                 <Typography.Paragraph>
-                  用中文调整讲解角色和表达方式，不再显示底层技术字段。
+                  O / O2.0 使用“讲解角色设定 + 回答风格”；SC / SC2.0 使用“角色设定”。所有提示词都要求填写中文有效内容，不能只填空格。
                 </Typography.Paragraph>
               </div>
               <div className="form-grid">
@@ -244,33 +333,43 @@ export function AdminDashboardPage() {
                       className="form-grid__full"
                       label="讲解角色设定"
                       name="system_role"
-                      rules={[{ required: true }]}
+                      rules={[buildTrimmedRequiredRule("讲解角色设定不能为空。")]}
                     >
-                      <Input.TextArea rows={5} />
+                      <Input.TextArea rows={6} placeholder="请输入讲解角色设定" />
                     </Form.Item>
                     <Form.Item
                       className="form-grid__full"
                       label="回答风格"
                       name="speaking_style"
-                      rules={[{ required: true }]}
+                      rules={[buildTrimmedRequiredRule("回答风格不能为空。")]}
                     >
-                      <Input.TextArea rows={4} />
+                      <Input.TextArea rows={4} placeholder="请输入回答风格" />
                     </Form.Item>
                   </>
                 )}
+
                 {(currentFamily === "SC" || currentFamily === "SC2.0") && (
                   <Form.Item
                     className="form-grid__full"
                     label="角色设定"
                     name="character_manifest"
-                    rules={[{ required: true }]}
+                    rules={[buildTrimmedRequiredRule("角色设定不能为空。")]}
                   >
-                    <Input.TextArea rows={8} />
+                    <Input.TextArea rows={8} placeholder="请输入角色设定" />
                   </Form.Item>
                 )}
               </div>
             </section>
 
+            <Form.Item name="display_title" hidden>
+              <Input />
+            </Form.Item>
+            <Form.Item name="display_subtitle" hidden>
+              <Input />
+            </Form.Item>
+            <Form.Item name="speaker" hidden>
+              <Input />
+            </Form.Item>
             <Form.Item name="avatar_url" hidden>
               <Input />
             </Form.Item>
@@ -304,25 +403,15 @@ export function AdminDashboardPage() {
             <Form.Item hidden label="识别退出意图" name="enable_user_query_exit" valuePropName="checked">
               <Switch />
             </Form.Item>
-            <Space>
-              <Button type="primary" htmlType="submit">
-                保存草稿
+
+            <div className="admin-action-bar">
+              <Button type="primary" htmlType="submit" loading={publishing}>
+                发布配置
               </Button>
-              <Button
-                onClick={async () => {
-                  try {
-                    await form.validateFields();
-                    await publishDraft(csrfToken, buildConfigPayload());
-                    message.success("已发布，下一次会话生效");
-                    await refresh();
-                  } catch (requestError) {
-                    message.error(requestError instanceof Error ? requestError.message : "发布失败");
-                  }
-                }}
-              >
-                发布到下一次会话
-              </Button>
-            </Space>
+              <Typography.Text className="admin-action-hint">
+                发布成功后，将在下一次会话生效。
+              </Typography.Text>
+            </div>
           </Form>
         </Card>
 
@@ -330,12 +419,24 @@ export function AdminDashboardPage() {
           {bundle ? (
             <div className="published-summary">
               <p>版本：v{bundle.published.version}</p>
+              <p>发布时间：{bundle.published.timestamp}</p>
               <p>角色：{bundle.published.config.bot_name}</p>
               <p>模型版本：{bundle.published.config.model_family}</p>
-              <p>熊猫音色：{formatSpeakerDisplay(bundle.published.config.speaker)}</p>
-              <p>声音风格：{formatPlaybackTone(bundle.published.config.playback_tone)}</p>
-              <p>超时：{bundle.published.config.idle_timeout_sec} 秒</p>
+              <p>自动结束：{autoEndModeLabelMap[bundle.published.config.auto_end_mode]}</p>
+              <p>
+                静默超时：
+                {bundle.published.config.auto_end_mode === "silence_timeout"
+                  ? `${bundle.published.config.idle_timeout_sec} 秒`
+                  : `已关闭（保留 ${bundle.published.config.idle_timeout_sec} 秒配置）`}
+              </p>
               <p>欢迎语：{bundle.published.config.welcome_text}</p>
+
+              {buildPromptSummary(bundle.published.config).map((item) => (
+                <div key={item.label} className="published-summary__block">
+                  <span className="published-summary__label">{item.label}</span>
+                  <p className="published-summary__text">{item.text}</p>
+                </div>
+              ))}
             </div>
           ) : null}
         </Card>
@@ -348,8 +449,7 @@ export function AdminDashboardPage() {
             columns={[
               { title: "版本", dataIndex: "version", width: 90 },
               { title: "角色", render: (_, record) => record.config.bot_name },
-              { title: "音色", render: (_, record) => formatSpeakerDisplay(record.config.speaker) },
-              { title: "风格", render: (_, record) => formatPlaybackTone(record.config.playback_tone) },
+              { title: "模型版本", render: (_, record) => record.config.model_family },
               { title: "发布时间", dataIndex: "published_at" },
             ]}
           />

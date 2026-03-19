@@ -74,6 +74,7 @@ class RealtimeSessionManager:
                         "sessionId": self._active.session_id,
                         "resumeToken": self._active.resume_token,
                         "configVersion": self._active.config_version,
+                        "autoEndMode": self._active.config.auto_end_mode,
                         "idleTimeoutSec": self._active.config.idle_timeout_sec,
                         "resumed": True,
                         "state": self._active.state,
@@ -146,6 +147,7 @@ class RealtimeSessionManager:
                     "sessionId": handle.session_id,
                     "resumeToken": handle.resume_token,
                     "configVersion": handle.config_version,
+                    "autoEndMode": handle.config.auto_end_mode,
                     "idleTimeoutSec": handle.config.idle_timeout_sec,
                     "resumed": False,
                     "state": handle.state,
@@ -185,6 +187,8 @@ class RealtimeSessionManager:
 
     async def heartbeat(self, handle: SessionHandle) -> None:
         if handle.closed:
+            return
+        if handle.config.auto_end_mode != "silence_timeout":
             return
         if time.monotonic() - handle.last_activity_at > handle.config.idle_timeout_sec:
             await self.close_session(handle, "idle_timeout")

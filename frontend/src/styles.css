@@ -406,6 +406,23 @@ a {
   margin: 0;
 }
 
+.published-summary__block {
+  display: grid;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.published-summary__label {
+  color: var(--accent-strong);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.published-summary__text {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
 .admin-form-section {
   display: grid;
   gap: 16px;
@@ -446,6 +463,21 @@ a {
   font-size: 0.84rem;
   letter-spacing: 0.01em;
   word-break: break-all;
+}
+
+.admin-inline-alert {
+  margin-bottom: 20px;
+}
+
+.admin-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-action-hint {
+  color: var(--muted) !important;
 }
 
 .admin-shell .ant-card,
@@ -583,6 +615,17 @@ a {
 .admin-page .ant-alert {
   border-color: rgba(255, 105, 120, 0.26);
   background: rgba(53, 13, 22, 0.58);
+}
+
+.admin-page .ant-alert-info {
+  border-color: rgba(116, 212, 255, 0.26);
+  background: rgba(7, 19, 34, 0.72);
+}
+
+.admin-page .ant-alert-info .ant-alert-message,
+.admin-page .ant-alert-info .ant-alert-description,
+.admin-page .ant-alert-info .ant-alert-icon {
+  color: var(--text) !important;
 }
 
 .admin-page .ant-switch {

@@ -1,5 +1,6 @@
 export type ModelFamily = "O" | "O2.0" | "SC" | "SC2.0";
 export type PlaybackTone = "panda_warm";
+export type AutoEndMode = "silence_timeout" | "disconnect_only";
 
 export interface LocationConfig {
   city: string;
@@ -15,6 +16,7 @@ export interface MuseumConfig {
   display_subtitle: string;
   avatar_url?: string | null;
   idle_timeout_sec: number;
+  auto_end_mode: AutoEndMode;
   welcome_text: string;
   model_family: ModelFamily;
   model?: string | null;

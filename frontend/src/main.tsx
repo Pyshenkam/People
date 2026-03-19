@@ -6,6 +6,7 @@ import "antd/dist/reset.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { ConfigProvider } from "antd";
+import zhCN from "antd/locale/zh_CN";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./styles.css";
@@ -13,6 +14,12 @@ import "./styles.css";
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ConfigProvider
+      locale={zhCN}
+      form={{
+        validateMessages: {
+          required: "${label}不能为空。",
+        },
+      }}
       theme={{
         token: {
           colorPrimary: "#5fdaff",

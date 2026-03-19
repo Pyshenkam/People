@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 from .logging_utils import configure_logging, get_logger
 from .schemas import AdminLoginRequest, AdminSessionStatus, ConfigBundle, MuseumConfig, PublicConfigResponse
@@ -18,12 +19,62 @@ from .store import ConfigStore
 
 logger = get_logger("main")
 
+FIELD_LABELS = {
+    "display_title": "展示标题",
+    "display_subtitle": "展示副标题",
+    "idle_timeout_sec": "静默超时",
+    "auto_end_mode": "自动结束模式",
+    "welcome_text": "欢迎语",
+    "model_family": "模型版本",
+    "bot_name": "角色名称",
+    "system_role": "讲解角色设定",
+    "speaking_style": "回答风格",
+    "character_manifest": "角色设定",
+}
+
 
 @dataclass(slots=True)
 class ConnectionContext:
     client_id: str | None = None
     resume_token: str | None = None
     session: SessionHandle | None = None
+
+
+def normalize_validation_message(field_name: str, error: dict) -> str:
+    label = FIELD_LABELS.get(field_name, field_name)
+    error_type = str(error.get("type", ""))
+    message = str(error.get("msg", "")).removeprefix("Value error, ").strip()
+
+    if error_type == "literal_error":
+        if field_name == "auto_end_mode":
+            return "请选择有效的自动结束模式。"
+        if field_name == "model_family":
+            return "请选择有效的模型版本。"
+
+    if error_type in {"missing", "string_too_short"}:
+        return f"{label}不能为空。"
+
+    if message:
+        return message
+
+    return f"{label}填写不正确。"
+
+
+def build_validation_detail(exc: ValidationError) -> dict:
+    field_errors: dict[str, list[str]] = {}
+    for error in exc.errors():
+        loc = error.get("loc", ())
+        if not loc:
+            continue
+        field_name = ".".join(str(part) for part in loc)
+        field_errors.setdefault(field_name, []).append(
+            normalize_validation_message(str(loc[-1]), error)
+        )
+
+    return {
+        "message": "发布失败，请先检查标红字段。",
+        "fieldErrors": field_errors,
+    }
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -56,6 +107,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def get_sessions() -> RealtimeSessionManager:
         return app.state.sessions
+
+    def validate_config_payload(body: object) -> MuseumConfig:
+        try:
+            return MuseumConfig.model_validate(body)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=build_validation_detail(exc)) from exc
 
     @app.get("/api/health")
     async def healthcheck() -> dict:
@@ -126,7 +183,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         security.validate_csrf(request)
         security.require_admin(request)
         body = await request.json()
-        config = MuseumConfig.model_validate(body)
+        config = validate_config_payload(body)
         draft = get_store().save_draft(config, updated_by="admin")
         return {"updatedAt": draft.updated_at.isoformat(), "ok": True}
 
@@ -140,7 +197,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except json.JSONDecodeError:
             body = {}
         if isinstance(body, dict) and body:
-            config = MuseumConfig.model_validate(body)
+            config = validate_config_payload(body)
             get_store().save_draft(config, updated_by="admin")
         published = get_store().publish_draft("admin")
         return {
