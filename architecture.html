@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>美妆小红书爆款文案 Multi-Agent 架构</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+  :root {
+    --bg-primary: #0a0a1a;
+    --bg-secondary: #12122a;
+    --glass-bg: rgba(255,255,255,0.03);
+    --glass-border: rgba(255,255,255,0.08);
+    --text-primary: #e8e8f0;
+    --text-secondary: #8888aa;
+    --text-muted: #555570;
+
+    --accent-orchid: #b44aff;
+    --accent-coral: #ff6b6b;
+    --accent-cyan: #00d4ff;
+    --accent-lime: #a3ff12;
+    --accent-gold: #ffd700;
+    --accent-pink: #ff4da6;
+    --accent-blue: #4a90ff;
+    --accent-green: #00e676;
+
+    --stage1-color: #00d4ff;
+    --stage2-color: #b44aff;
+    --stage3-color: #ff6b6b;
+    --stage4-color: #00e676;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ========== Background Grid ========== */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ========== Ambient Glow ========== */
+  .ambient-glow {
+    position: fixed;
+    border-radius: 50%;
+    filter: blur(120px);
+    opacity: 0.15;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .glow-1 { width: 600px; height: 600px; background: var(--accent-orchid); top: -100px; left: -100px; }
+  .glow-2 { width: 500px; height: 500px; background: var(--accent-cyan); bottom: -100px; right: -100px; }
+  .glow-3 { width: 400px; height: 400px; background: var(--accent-coral); top: 50%; left: 50%; transform: translate(-50%,-50%); }
+
+  /* ========== Container ========== */
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 40px 30px 80px;
+  }
+
+  /* ========== Header ========== */
+  .header {
+    text-align: center;
+    margin-bottom: 60px;
+  }
+  .header-badge {
+    display: inline-block;
+    padding: 6px 18px;
+    border-radius: 20px;
+    background: rgba(180,74,255,0.15);
+    border: 1px solid rgba(180,74,255,0.3);
+    color: var(--accent-orchid);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  .header h1 {
+    font-size: 42px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #fff 0%, #b44aff 50%, #00d4ff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1.3;
+    margin-bottom: 12px;
+  }
+  .header p {
+    color: var(--text-secondary);
+    font-size: 16px;
+    font-weight: 300;
+    max-width: 700px;
+    margin: 0 auto;
+    line-height: 1.6;
+  }
+
+  /* ========== Stage Section ========== */
+  .stage {
+    position: relative;
+    margin-bottom: 20px;
+  }
+  .stage-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .stage-number {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .stage-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+  .stage-line {
+    flex: 1;
+    height: 1px;
+    opacity: 0.3;
+  }
+
+  /* ========== Input Node ========== */
+  .input-node {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 30px;
+  }
+  .input-card {
+    background: linear-gradient(135deg, rgba(180,74,255,0.1), rgba(0,212,255,0.1));
+    border: 1px solid rgba(180,74,255,0.25);
+    border-radius: 16px;
+    padding: 20px 40px;
+    text-align: center;
+    backdrop-filter: blur(20px);
+    transition: all 0.3s ease;
+  }
+  .input-card:hover {
+    border-color: rgba(180,74,255,0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(180,74,255,0.15);
+  }
+  .input-card .icon { font-size: 28px; margin-bottom: 8px; }
+  .input-card h3 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+  .input-card p { font-size: 12px; color: var(--text-secondary); }
+
+  /* ========== Orchestrator ========== */
+  .orchestrator-wrap {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 30px;
+  }
+  .orchestrator {
+    position: relative;
+    background: linear-gradient(135deg, rgba(255,215,0,0.08), rgba(255,107,107,0.08));
+    border: 1.5px solid rgba(255,215,0,0.3);
+    border-radius: 50px;
+    padding: 14px 48px;
+    text-align: center;
+    backdrop-filter: blur(20px);
+    transition: all 0.3s ease;
+    cursor: default;
+  }
+  .orchestrator:hover {
+    border-color: rgba(255,215,0,0.6);
+    box-shadow: 0 0 40px rgba(255,215,0,0.12);
+  }
+  .orchestrator h3 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent-gold);
+  }
+  .orchestrator p {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+  .orchestrator .pulse-ring {
+    position: absolute;
+    inset: -4px;
+    border-radius: 50px;
+    border: 1px solid rgba(255,215,0,0.15);
+    animation: pulse 3s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 0.5; }
+    50% { transform: scale(1.04); opacity: 0; }
+  }
+
+  /* ========== Flow Arrow ========== */
+  .flow-arrow {
+    display: flex;
+    justify-content: center;
+    margin: 16px 0;
+    position: relative;
+  }
+  .flow-arrow .arrow-line {
+    width: 2px;
+    height: 36px;
+    position: relative;
+    overflow: hidden;
+  }
+  .flow-arrow .arrow-line::before {
+    content: '';
+    position: absolute;
+    top: -100%;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    animation: flowDown 1.5s linear infinite;
+  }
+  @keyframes flowDown {
+    0% { top: -100%; }
+    100% { top: 100%; }
+  }
+  .flow-arrow svg {
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  /* ========== Agent Cards Grid ========== */
+  .agents-grid {
+    display: grid;
+    gap: 16px;
+    margin-bottom: 10px;
+  }
+  .agents-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+  .agents-grid.cols-2 { grid-template-columns: repeat(2, 1fr); max-width: 740px; margin-left: auto; margin-right: auto; }
+  .agents-grid.cols-3 { grid-template-columns: repeat(3, 1fr); max-width: 900px; margin-left: auto; margin-right: auto; }
+
+  /* ========== Agent Card ========== */
+  .agent-card {
+    position: relative;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    padding: 22px;
+    backdrop-filter: blur(20px);
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    cursor: default;
+    overflow: hidden;
+  }
+  .agent-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    border-radius: 16px 16px 0 0;
+    opacity: 0.8;
+    transition: opacity 0.3s;
+  }
+  .agent-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(255,255,255,0.15);
+  }
+  .agent-card:hover::before { opacity: 1; }
+
+  .agent-card .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .agent-card .card-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .agent-card .card-id {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    opacity: 0.5;
+  }
+  .agent-card .card-name {
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+  .agent-card .card-body {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+  }
+  .agent-card .card-body .highlight {
+    display: inline;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-weight: 500;
+  }
+
+  /* Card detail expand */
+  .agent-card .card-detail {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.5s cubic-bezier(0.16, 1, 0.3, 1), margin 0.3s;
+    margin-top: 0;
+  }
+  .agent-card:hover .card-detail {
+    max-height: 300px;
+    margin-top: 12px;
+  }
+  .card-detail-inner {
+    padding-top: 12px;
+    border-top: 1px solid var(--glass-border);
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.8;
+  }
+  .card-detail-inner .tool-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    font-size: 10px;
+    margin: 2px 3px;
+    color: var(--text-secondary);
+  }
+
+  /* Card color variants */
+  .agent-card.cyan::before { background: linear-gradient(90deg, var(--accent-cyan), transparent); }
+  .agent-card.cyan:hover { box-shadow: 0 8px 40px rgba(0,212,255,0.1); }
+  .agent-card.cyan .card-icon { background: rgba(0,212,255,0.12); color: var(--accent-cyan); }
+  .agent-card.cyan .highlight { background: rgba(0,212,255,0.1); color: var(--accent-cyan); }
+
+  .agent-card.orchid::before { background: linear-gradient(90deg, var(--accent-orchid), transparent); }
+  .agent-card.orchid:hover { box-shadow: 0 8px 40px rgba(180,74,255,0.1); }
+  .agent-card.orchid .card-icon { background: rgba(180,74,255,0.12); color: var(--accent-orchid); }
+  .agent-card.orchid .highlight { background: rgba(180,74,255,0.1); color: var(--accent-orchid); }
+
+  .agent-card.coral::before { background: linear-gradient(90deg, var(--accent-coral), transparent); }
+  .agent-card.coral:hover { box-shadow: 0 8px 40px rgba(255,107,107,0.1); }
+  .agent-card.coral .card-icon { background: rgba(255,107,107,0.12); color: var(--accent-coral); }
+  .agent-card.coral .highlight { background: rgba(255,107,107,0.1); color: var(--accent-coral); }
+
+  .agent-card.lime::before { background: linear-gradient(90deg, var(--accent-lime), transparent); }
+  .agent-card.lime:hover { box-shadow: 0 8px 40px rgba(163,255,18,0.08); }
+  .agent-card.lime .card-icon { background: rgba(163,255,18,0.1); color: var(--accent-lime); }
+  .agent-card.lime .highlight { background: rgba(163,255,18,0.1); color: var(--accent-lime); }
+
+  .agent-card.gold::before { background: linear-gradient(90deg, var(--accent-gold), transparent); }
+  .agent-card.gold:hover { box-shadow: 0 8px 40px rgba(255,215,0,0.08); }
+  .agent-card.gold .card-icon { background: rgba(255,215,0,0.1); color: var(--accent-gold); }
+  .agent-card.gold .highlight { background: rgba(255,215,0,0.1); color: var(--accent-gold); }
+
+  .agent-card.pink::before { background: linear-gradient(90deg, var(--accent-pink), transparent); }
+  .agent-card.pink:hover { box-shadow: 0 8px 40px rgba(255,77,166,0.1); }
+  .agent-card.pink .card-icon { background: rgba(255,77,166,0.12); color: var(--accent-pink); }
+  .agent-card.pink .highlight { background: rgba(255,77,166,0.1); color: var(--accent-pink); }
+
+  .agent-card.blue::before { background: linear-gradient(90deg, var(--accent-blue), transparent); }
+  .agent-card.blue:hover { box-shadow: 0 8px 40px rgba(74,144,255,0.1); }
+  .agent-card.blue .card-icon { background: rgba(74,144,255,0.12); color: var(--accent-blue); }
+  .agent-card.blue .highlight { background: rgba(74,144,255,0.1); color: var(--accent-blue); }
+
+  .agent-card.green::before { background: linear-gradient(90deg, var(--accent-green), transparent); }
+  .agent-card.green:hover { box-shadow: 0 8px 40px rgba(0,230,118,0.08); }
+  .agent-card.green .card-icon { background: rgba(0,230,118,0.1); color: var(--accent-green); }
+  .agent-card.green .highlight { background: rgba(0,230,118,0.1); color: var(--accent-green); }
+
+  /* ========== Connector SVG between stages ========== */
+  .connector-svg {
+    display: block;
+    margin: 0 auto;
+    overflow: visible;
+  }
+  .connector-line {
+    stroke-dasharray: 6 4;
+    animation: dashFlow 1s linear infinite;
+  }
+  @keyframes dashFlow {
+    to { stroke-dashoffset: -10; }
+  }
+
+  /* ========== Sub Pipeline (Image Gen) ========== */
+  .sub-pipeline {
+    position: relative;
+    background: rgba(255,255,255,0.015);
+    border: 1px dashed rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 28px;
+    margin: 20px auto;
+    max-width: 1100px;
+  }
+  .sub-pipeline-label {
+    position: absolute;
+    top: -11px;
+    left: 28px;
+    background: var(--bg-primary);
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent-pink);
+  }
+  .pipeline-steps {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .pipeline-step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.3s;
+    white-space: nowrap;
+  }
+  .pipeline-step:hover {
+    background: rgba(255,77,166,0.08);
+    border-color: rgba(255,77,166,0.25);
+  }
+  .pipeline-step .step-icon { font-size: 16px; }
+  .pipeline-step .step-label { color: var(--text-secondary); }
+  .pipeline-arrow {
+    color: var(--text-muted);
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  /* ========== Output Node ========== */
+  .output-node {
+    display: flex;
+    justify-content: center;
+    margin-top: 30px;
+  }
+  .output-card {
+    background: linear-gradient(135deg, rgba(0,230,118,0.08), rgba(0,212,255,0.08));
+    border: 1px solid rgba(0,230,118,0.25);
+    border-radius: 16px;
+    padding: 24px 48px;
+    text-align: center;
+    backdrop-filter: blur(20px);
+    transition: all 0.3s;
+  }
+  .output-card:hover {
+    border-color: rgba(0,230,118,0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0,230,118,0.1);
+  }
+  .output-items {
+    display: flex;
+    gap: 24px;
+    margin-top: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .output-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .output-item .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ========== Feedback Loop ========== */
+  .feedback-loop {
+    position: relative;
+    margin: 30px auto 0;
+    max-width: 600px;
+    text-align: center;
+  }
+  .feedback-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 28px;
+    background: rgba(255,215,0,0.05);
+    border: 1px dashed rgba(255,215,0,0.25);
+    border-radius: 40px;
+    font-size: 13px;
+    color: var(--accent-gold);
+    font-weight: 500;
+    transition: all 0.3s;
+  }
+  .feedback-card:hover {
+    background: rgba(255,215,0,0.1);
+    border-color: rgba(255,215,0,0.4);
+    box-shadow: 0 0 30px rgba(255,215,0,0.08);
+  }
+  .feedback-card .loop-icon {
+    font-size: 20px;
+    animation: spin 4s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* ========== Retry Path ========== */
+  .retry-path {
+    display: flex;
+    justify-content: center;
+    margin: 10px 0;
+  }
+  .retry-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    border-radius: 20px;
+    background: rgba(255,107,107,0.06);
+    border: 1px solid rgba(255,107,107,0.2);
+    font-size: 11px;
+    color: var(--accent-coral);
+    font-weight: 500;
+  }
+
+  /* ========== Data Layer ========== */
+  .data-layer {
+    margin-top: 50px;
+    padding-top: 40px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  .data-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  .data-card {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    padding: 18px;
+    transition: all 0.3s;
+    text-align: center;
+  }
+  .data-card:hover {
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.12);
+    transform: translateY(-2px);
+  }
+  .data-card .data-icon { font-size: 24px; margin-bottom: 8px; }
+  .data-card .data-name { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .data-card .data-desc { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+
+  /* ========== Tech Stack Bar ========== */
+  .tech-stack {
+    margin-top: 40px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+  }
+  .tech-tag {
+    padding: 6px 14px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 500;
+    transition: all 0.3s;
+  }
+  .tech-tag:hover {
+    background: rgba(180,74,255,0.08);
+    border-color: rgba(180,74,255,0.25);
+    color: var(--accent-orchid);
+  }
+
+  /* ========== Legend ========== */
+  .legend {
+    margin-top: 40px;
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+
+  /* ========== Responsive ========== */
+  @media (max-width: 900px) {
+    .agents-grid.cols-4 { grid-template-columns: repeat(2, 1fr); }
+    .data-grid { grid-template-columns: repeat(2, 1fr); }
+    .header h1 { font-size: 28px; }
+    .pipeline-steps { flex-direction: column; align-items: stretch; }
+    .pipeline-arrow { transform: rotate(90deg); text-align: center; }
+  }
+
+  /* ========== Animations on scroll ========== */
+  .fade-in {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+  .fade-in.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+</style>
+</head>
+<body>
+
+<div class="ambient-glow glow-1"></div>
+<div class="ambient-glow glow-2"></div>
+<div class="ambient-glow glow-3"></div>
+
+<div class="container">
+
+  <!-- Header -->
+  <header class="header fade-in">
+    <div class="header-badge">Multi-Agent Architecture v2</div>
+    <h1>美妆小红书爆款文案<br>智能创作系统</h1>
+    <p>7 个专职 Agent + 1 个编排器，覆盖热点挖掘、产品理解、爆款分析、文案创作、视觉生成、模拟测试、合规审核全链路</p>
+  </header>
+
+  <!-- Input -->
+  <div class="input-node fade-in">
+    <div class="input-card">
+      <div class="icon">📤</div>
+      <h3>用户输入</h3>
+      <p>上传产品图 · 选择目标人群 · 风格偏好</p>
+    </div>
+  </div>
+
+  <!-- Arrow -->
+  <svg class="connector-svg" width="2" height="36" style="display:block;margin:0 auto;">
+    <line x1="1" y1="0" x2="1" y2="30" class="connector-line" stroke="rgba(255,215,0,0.4)" stroke-width="2"/>
+    <polygon points="-4,30 6,30 1,36" fill="rgba(255,215,0,0.4)"/>
+  </svg>
+
+  <!-- Orchestrator -->
+  <div class="orchestrator-wrap fade-in">
+    <div class="orchestrator">
+      <div class="pulse-ring"></div>
+      <h3>🎯 Orchestrator 编排器</h3>
+      <p>意图解析 · 任务分发 · 结果汇总 · 重试调度</p>
+    </div>
+  </div>
+
+  <!-- ============ STAGE 1 ============ -->
+  <svg class="connector-svg" width="2" height="36" style="display:block;margin:10px auto;">
+    <line x1="1" y1="0" x2="1" y2="30" class="connector-line" stroke="rgba(0,212,255,0.4)" stroke-width="2"/>
+    <polygon points="-4,30 6,30 1,36" fill="rgba(0,212,255,0.4)"/>
+  </svg>
+
+  <div class="stage fade-in">
+    <div class="stage-label">
+      <div class="stage-number" style="background:rgba(0,212,255,0.15);color:var(--accent-cyan);">01</div>
+      <span class="stage-title" style="color:var(--accent-cyan);">素材采集层</span>
+      <div class="stage-line" style="background:linear-gradient(90deg,var(--accent-cyan),transparent);"></div>
+      <span style="font-size:11px;color:var(--text-muted);white-space:nowrap;">⚡ 并行执行</span>
+    </div>
+
+    <div class="agents-grid cols-4">
+      <!-- Agent 1 -->
+      <div class="agent-card cyan">
+        <div class="card-header">
+          <div class="card-icon">🔍</div>
+          <div>
+            <div class="card-id">AGENT 01</div>
+            <div class="card-name">热点猎手</div>
+          </div>
+        </div>
+        <div class="card-body">
+          挖掘热点<span class="highlight">内核</span>而非表面词<br>
+          输出情绪标签 · 视觉标签 · 梗基因 · 产品桥梁
+        </div>
+        <div class="card-detail">
+          <div class="card-detail-inner">
+            <strong>创意通感引擎</strong>：分析热点本质（松弛感/破碎感/清冷），生成可嫁接的比喻桥梁<br>
+            <span class="tool-tag">Web Search</span>
+            <span class="tool-tag">社媒热搜API</span>
+            <span class="tool-tag">语义分析</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent 2 -->
+      <div class="agent-card orchid">
+        <div class="card-header">
+          <div class="card-icon">📦</div>
+          <div>
+            <div class="card-id">AGENT 02</div>
+            <div class="card-name">产品专家</div>
+          </div>
+        </div>
+        <div class="card-body">
+          从产品知识库<span class="highlight">RAG</span>检索<br>
+          成分 · 功效 · 卖点 · 适用人群 · 合规边界
+        </div>
+        <div class="card-detail">
+          <div class="card-detail-inner">
+            输出<strong>产品事实卡片</strong>，所有功效描述均有知识库原文溯源<br>
+            <span class="tool-tag">向量检索</span>
+            <span class="tool-tag">产品库 RAG</span>
+            <span class="tool-tag">合规规则</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent 3 -->
+      <div class="agent-card coral">
+        <div class="card-header">
+          <div class="card-icon">📊</div>
+          <div>
+            <div class="card-id">AGENT 03</div>
+            <div class="card-name">爆款分析师</div>
+          </div>
+        </div>
+        <div class="card-body">
+          分析实时<span class="highlight">爆款模式</span><br>
+          标题公式 · 内容节奏 · 标签策略 · 语气指纹
+        </div>
+        <div class="card-detail">
+          <div class="card-detail-inner">
+            内置<strong>语气指纹库</strong>：废话少女 / 成分研究生 / 高效悦己姐 / 质感投资人<br>
+            <span class="tool-tag">爆款库 RAG</span>
+            <span class="tool-tag">内容抓取</span>
+            <span class="tool-tag">模式分析</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent 6 -->
+      <div class="agent-card lime">
+        <div class="card-header">
+          <div class="card-icon">📈</div>
+          <div>
+            <div class="card-id">AGENT 06</div>
+            <div class="card-name">数据回流</div>
+          </div>
+        </div>
+        <div class="card-body">
+          历史笔记<span class="highlight">效果复盘</span><br>
+          高转化词 · CTR 分析 · 动态调权
+        </div>
+        <div class="card-detail">
+          <div class="card-detail-inner">
+            接入历史发布数据，自动识别<strong>高转化模式</strong>并提升 RAG 权重<br>
+            <span class="tool-tag">数据分析</span>
+            <span class="tool-tag">权重调整</span>
+            <span class="tool-tag">A/B复盘</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ STAGE 2 ============ -->
+  <svg class="connector-svg" width="2" height="36" style="display:block;margin:10px auto;">
+    <line x1="1" y1="0" x2="1" y2="30" class="connector-line" stroke="rgba(180,74,255,0.4)" stroke-width="2"/>
+    <polygon points="-4,30 6,30 1,36" fill="rgba(180,74,255,0.4)"/>
+  </svg>
+
+  <div class="stage fade-in">
+    <div class="stage-label">
+      <div class="stage-number" style="background:rgba(180,74,255,0.15);color:var(--accent-orchid);">02</div>
+      <span class="stage-title" style="color:var(--accent-orchid);">创作层</span>
+      <div class="stage-line" style="background:linear-gradient(90deg,var(--accent-orchid),transparent);"></div>
+      <span style="font-size:11px;color:var(--text-muted);white-space:nowrap;">🔗 串行执行</span>
+    </div>
+
+    <div class="agents-grid cols-2">
+      <!-- Agent 4 -->
+      <div class="agent-card gold">
+        <div class="card-header">
+          <div class="card-icon">✍️</div>
+          <div>
+            <div class="card-id">AGENT 04</div>
+            <div class="card-name">文案创作者</div>
+          </div>
+        </div>
+        <div class="card-body">
+          三步管线：<span class="highlight">初稿</span> → <span class="highlight">通感融合</span> → <span class="highlight">XHS化</span><br>
+          多人设版本 · 反AI感滤镜 · 场景化表达
+        </div>
+        <div class="card-detail">
+          <div class="card-detail-inner">
+            <strong>XHS-ify 后处理</strong>：功能词→场景词、呼吸感分段、emoji节奏、人味细节补充<br>
+            <span class="tool-tag">LLM生成</span>
+            <span class="tool-tag">通感引擎</span>
+            <span class="tool-tag">语气校准</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent 7 -->
+      <div class="agent-card pink">
+        <div class="card-header">
+          <div class="card-icon">🎬</div>
+          <div>
+            <div class="card-id">AGENT 07</div>
+            <div class="card-name">视觉导演</div>
+          </div>
+        </div>
+        <div class="card-body">
+          封面构图 · 滤镜匹配 · <span class="highlight">花字设计</span><br>
+          3:4 视觉脚本 · 多人设风格切换
+        </div>
+        <div class="card-detail">
+          <div class="card-detail-inner">
+            按人设切换：<strong>多巴胺色/莫兰迪色</strong>、手写体/衬线体、字号比例<br>
+            <span class="tool-tag">构图脚本</span>
+            <span class="tool-tag">滤镜引擎</span>
+            <span class="tool-tag">排版系统</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ IMAGE PIPELINE ============ -->
+  <svg class="connector-svg" width="2" height="30" style="display:block;margin:8px auto;">
+    <line x1="1" y1="0" x2="1" y2="24" class="connector-line" stroke="rgba(255,77,166,0.4)" stroke-width="2"/>
+    <polygon points="-4,24 6,24 1,30" fill="rgba(255,77,166,0.4)"/>
+  </svg>
+
+  <div class="sub-pipeline fade-in">
+    <div class="sub-pipeline-label">📸 图片生成管线 · Image Pipeline</div>
+    <div class="pipeline-steps">
+      <div class="pipeline-step">
+        <span class="step-icon">👁️</span>
+        <span class="step-label">图片理解</span>
+      </div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-step">
+        <span class="step-icon">✂️</span>
+        <span class="step-label">智能抠图</span>
+      </div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-step">
+        <span class="step-icon">🎨</span>
+        <span class="step-label">背景/场景生成</span>
+      </div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-step">
+        <span class="step-icon">💡</span>
+        <span class="step-label">光影匹配合成</span>
+      </div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-step">
+        <span class="step-icon">🔤</span>
+        <span class="step-label">花字叠加</span>
+      </div>
+      <span class="pipeline-arrow">→</span>
+      <div class="pipeline-step">
+        <span class="step-icon">🖼️</span>
+        <span class="step-label">滤镜统一</span>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:14px;font-size:11px;color:var(--text-muted);">
+      产品本体 <strong style="color:var(--accent-green);">永远用真图</strong> · AI 只负责环境与氛围 · 花字自动排版
+    </div>
+  </div>
+
+  <!-- ============ STAGE 3 ============ -->
+  <svg class="connector-svg" width="2" height="36" style="display:block;margin:8px auto;">
+    <line x1="1" y1="0" x2="1" y2="30" class="connector-line" stroke="rgba(255,107,107,0.4)" stroke-width="2"/>
+    <polygon points="-4,30 6,30 1,36" fill="rgba(255,107,107,0.4)"/>
+  </svg>
+
+  <div class="stage fade-in">
+    <div class="stage-label">
+      <div class="stage-number" style="background:rgba(255,107,107,0.15);color:var(--accent-coral);">03</div>
+      <span class="stage-title" style="color:var(--accent-coral);">测试与审核层</span>
+      <div class="stage-line" style="background:linear-gradient(90deg,var(--accent-coral),transparent);"></div>
+    </div>
+
+    <div class="agents-grid cols-2">
+      <!-- Agent 8 -->
+      <div class="agent-card blue">
+        <div class="card-header">
+          <div class="card-icon">🎯</div>
+          <div>
+            <div class="card-id">AGENT 08</div>
+            <div class="card-name">预判分发</div>
+          </div>
+        </div>
+        <div class="card-body">
+          模拟<span class="highlight">用户画像池</span>打分<br>
+          大学生A · 上班族B · 精致宝妈C
+        </div>
+        <div class="card-detail">
+          <div class="card-detail-inner">
+            3-5个微型LLM角色模拟真实用户，<strong>&lt;3分打回重写</strong>并附吐槽点<br>
+            <span class="tool-tag">角色模拟</span>
+            <span class="tool-tag">评分系统</span>
+            <span class="tool-tag">反馈生成</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent 5 -->
+      <div class="agent-card green">
+        <div class="card-header">
+          <div class="card-icon">✅</div>
+          <div>
+            <div class="card-id">AGENT 05</div>
+            <div class="card-name">审核官</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <span class="highlight">合规校验</span> · 功效准确性 · 品牌调性<br>
+          广告法违禁词 · 舆情风险评估
+        </div>
+        <div class="card-detail">
+          <div class="card-detail-inner">
+            比对产品知识库原文，<strong>杜绝功效夸大</strong>，检查热点舆情风险<br>
+            <span class="tool-tag">合规词库</span>
+            <span class="tool-tag">品牌规范RAG</span>
+            <span class="tool-tag">舆情检测</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Retry -->
+  <div class="retry-path fade-in">
+    <div class="retry-badge">
+      🔄 未通过 → 附修改指令回到创作层（最多 2 次循环）
+    </div>
+  </div>
+
+  <!-- Arrow to output -->
+  <svg class="connector-svg" width="2" height="36" style="display:block;margin:10px auto;">
+    <line x1="1" y1="0" x2="1" y2="30" class="connector-line" stroke="rgba(0,230,118,0.4)" stroke-width="2"/>
+    <polygon points="-4,30 6,30 1,36" fill="rgba(0,230,118,0.4)"/>
+  </svg>
+
+  <!-- Output -->
+  <div class="output-node fade-in">
+    <div class="output-card">
+      <div style="font-size:28px;margin-bottom:6px;">🎉</div>
+      <h3 style="font-size:17px;font-weight:700;">最终输出</h3>
+      <div class="output-items">
+        <div class="output-item">
+          <div class="dot" style="background:var(--accent-gold);"></div>
+          多版本文案
+        </div>
+        <div class="output-item">
+          <div class="dot" style="background:var(--accent-pink);"></div>
+          配图序列
+        </div>
+        <div class="output-item">
+          <div class="dot" style="background:var(--accent-cyan);"></div>
+          标签组合
+        </div>
+        <div class="output-item">
+          <div class="dot" style="background:var(--accent-blue);"></div>
+          模拟评分报告
+        </div>
+        <div class="output-item">
+          <div class="dot" style="background:var(--accent-green);"></div>
+          合规审核报告
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feedback Loop -->
+  <div class="feedback-loop fade-in" style="margin-top:30px;">
+    <svg class="connector-svg" width="2" height="24" style="display:block;margin:0 auto 10px;">
+      <line x1="1" y1="0" x2="1" y2="18" class="connector-line" stroke="rgba(255,215,0,0.3)" stroke-width="2"/>
+      <polygon points="-4,18 6,18 1,24" fill="rgba(255,215,0,0.3)"/>
+    </svg>
+    <div class="feedback-card">
+      <span class="loop-icon">🔄</span>
+      发布后数据回流 → 持续优化 RAG 权重与爆款模型
+    </div>
+  </div>
+
+  <!-- ============ DATA LAYER ============ -->
+  <div class="data-layer fade-in">
+    <div class="stage-label" style="margin-bottom:20px;">
+      <div class="stage-number" style="background:rgba(255,255,255,0.06);color:var(--text-secondary);">⛁</div>
+      <span class="stage-title" style="color:var(--text-secondary);">数据层</span>
+      <div class="stage-line" style="background:linear-gradient(90deg,rgba(255,255,255,0.15),transparent);"></div>
+    </div>
+
+    <div class="data-grid">
+      <div class="data-card">
+        <div class="data-icon">📦</div>
+        <div class="data-name">产品知识库</div>
+        <div class="data-desc">全量产品信息<br>成分·功效·适用人群</div>
+      </div>
+      <div class="data-card">
+        <div class="data-icon">🔥</div>
+        <div class="data-name">爆款文案库</div>
+        <div class="data-desc">历史高赞笔记<br>标题模板·标签集</div>
+      </div>
+      <div class="data-card">
+        <div class="data-icon">🎨</div>
+        <div class="data-name">品牌规范库</div>
+        <div class="data-desc">视觉调性·话术边界<br>合规红线</div>
+      </div>
+      <div class="data-card">
+        <div class="data-icon">🧑‍🤝‍🧑</div>
+        <div class="data-name">语气指纹库</div>
+        <div class="data-desc">四大人设画像<br>语言风格·emoji密度</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ TECH STACK ============ -->
+  <div style="margin-top:40px;" class="fade-in">
+    <div class="stage-label" style="margin-bottom:16px;">
+      <div class="stage-number" style="background:rgba(255,255,255,0.06);color:var(--text-secondary);">⚙</div>
+      <span class="stage-title" style="color:var(--text-secondary);">技术选型</span>
+      <div class="stage-line" style="background:linear-gradient(90deg,rgba(255,255,255,0.15),transparent);"></div>
+    </div>
+    <div class="tech-stack">
+      <span class="tech-tag">LangGraph</span>
+      <span class="tech-tag">GPT-4o</span>
+      <span class="tech-tag">Claude 3.5</span>
+      <span class="tech-tag">Pinecone</span>
+      <span class="tech-tag">SDXL / Flux</span>
+      <span class="tech-tag">SAM2</span>
+      <span class="tech-tag">IC-Light</span>
+      <span class="tech-tag">Real-ESRGAN</span>
+      <span class="tech-tag">ControlNet</span>
+      <span class="tech-tag">Tavily Search</span>
+      <span class="tech-tag">Pillow / Sharp</span>
+      <span class="tech-tag">CrewAI</span>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend fade-in">
+    <div class="legend-item">
+      <div class="legend-dot" style="background:var(--accent-cyan);"></div>
+      素材采集
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:var(--accent-orchid);"></div>
+      内容创作
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:var(--accent-pink);"></div>
+      图片生成
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:var(--accent-coral);"></div>
+      测试审核
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:var(--accent-green);"></div>
+      最终输出
+    </div>
+    <div class="legend-item">
+      <div class="legend-dot" style="background:var(--accent-gold);"></div>
+      数据回流
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Scroll animation
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.1 });
+
+document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

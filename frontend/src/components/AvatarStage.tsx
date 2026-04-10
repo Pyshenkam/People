@@ -174,7 +174,7 @@ function LoadedAvatar({
     previousPhaseElapsed: 0,
     transitionStartedAt: 0,
   });
-  const { scene, animations } = useGLTF(avatarUrl);
+  const { scene, animations } = useGLTF(avatarUrl, true);
   const fitted = useMemo(() => {
     // Skinned meshes need SkeletonUtils.clone(); a plain scene.clone(true)
     // keeps the outer hierarchy but can leave bone-driven deformation inert.
@@ -1127,7 +1127,7 @@ export const AvatarStage = memo(function AvatarStage({
 
   useEffect(() => {
     if (avatarUrl) {
-      useGLTF.preload(avatarUrl);
+      useGLTF.preload(avatarUrl, true);
     }
   }, [avatarUrl]);
 

@@ -7,7 +7,7 @@ $modelTargetDir = Join-Path $frontendDir "public\models"
 $modelTarget = Join-Path $modelTargetDir "panda-v2.glb"
 $modelSource = Join-Path $root "panda-V2.glb"
 $backendPort = 4800
-$adminPassword = "MuseumAdmin123!"
+$adminPassword = "dlsnjkjg"
 $localEnvPath = Join-Path $backendDir ".env.local"
 
 function Import-DotEnvFile {

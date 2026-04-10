@@ -100,6 +100,7 @@ function pushTrace(step: string, detail?: Record<string, unknown>) {
 export function useRealtimeSession(config: MuseumConfig | null) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [assistantLevel, setAssistantLevel] = useState(0);
+  const [activeConfig, setActiveConfig] = useState<MuseumConfig | null>(null);
 
   const clientIdRef = useRef<string>(getClientId());
   const resumeTokenRef = useRef<string | null>(window.localStorage.getItem("museum-resume-token"));
@@ -180,6 +181,7 @@ export function useRealtimeSession(config: MuseumConfig | null) {
         dispatch({ type: "error", message: errorMessage });
       } else if (finalPhase === "idle") {
         dispatch({ type: "reset" });
+        setActiveConfig(null);
       } else {
         dispatch({ type: "phase", phase: finalPhase });
       }
@@ -254,12 +256,13 @@ export function useRealtimeSession(config: MuseumConfig | null) {
   });
 
   const startConversation = useEffectEvent(async (configOverride?: MuseumConfig | null) => {
-    const activeConfig = configOverride ?? config;
-    if (!activeConfig || phaseRef.current !== "idle") {
+    const effectiveConfig = configOverride ?? config;
+    if (!effectiveConfig || phaseRef.current !== "idle") {
       return;
     }
 
     pushTrace("start:click");
+    setActiveConfig(effectiveConfig);
     dispatch({ type: "phase", phase: "opening_session" });
     dispatch({ type: "assistant", text: "", replyId: null });
     dispatch({ type: "user", text: "" });
@@ -565,6 +568,7 @@ export function useRealtimeSession(config: MuseumConfig | null) {
     userText: state.userText,
     error: state.error,
     assistantLevel,
+    activeConfig,
     statusText: statusTextMap[state.phase],
     startConversation,
     endConversation,

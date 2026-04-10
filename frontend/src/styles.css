@@ -192,6 +192,53 @@ a {
   box-shadow: 0 0 28px rgba(103, 223, 255, 0.12);
 }
 
+/* Idle screen arc title */
+.idle-title {
+  margin: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  user-select: none;
+  animation: idle-title-float 5s ease-in-out infinite;
+  padding-top: 2vh;
+}
+
+.idle-title__svg {
+  width: min(720px, 92vw);
+  height: auto;
+  overflow: visible;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5))
+          drop-shadow(0 0 30px rgba(103, 223, 255, 0.35))
+          drop-shadow(0 0 80px rgba(103, 223, 255, 0.12));
+}
+
+.idle-title__text {
+  font-size: 96px;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  fill: #eaf6ff;
+  stroke: rgba(103, 223, 255, 0.3);
+  stroke-width: 1.5;
+  paint-order: stroke fill;
+}
+
+.idle-title__text-shadow {
+  font-size: 96px;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  fill: none;
+  stroke: #4284a2;
+  stroke-width: 6;
+  paint-order: stroke;
+  filter: blur(1px);
+  transform: translate(0, 4px);
+}
+
+@keyframes idle-title-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
 .control-row {
   display: flex;
   gap: 12px;
@@ -352,6 +399,69 @@ a {
 .admin-login-card {
   width: min(520px, calc(100vw - 32px));
   border-radius: 28px;
+}
+
+/* Redesigned login box */
+.login-box {
+  width: min(360px, calc(100vw - 48px));
+  padding: 40px 32px 28px;
+  border-radius: 20px;
+  background: rgba(10, 21, 37, 0.88);
+  border: 1px solid rgba(116, 212, 255, 0.15);
+  backdrop-filter: blur(24px);
+  text-align: center;
+}
+
+.login-box__icon {
+  font-size: 36px;
+  margin-bottom: 8px;
+}
+
+.login-box__title {
+  margin: 0 0 24px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.06em;
+}
+
+.login-box .ant-form-item {
+  margin-bottom: 12px;
+}
+
+.login-box__error {
+  margin: -4px 0 12px;
+  font-size: 13px;
+  color: #ff6b7a;
+  text-align: left;
+}
+
+.login-box__back {
+  display: inline-block;
+  margin-top: 18px;
+  padding: 0;
+  font-size: 13px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.login-box__back:hover {
+  color: var(--accent);
+}
+
+.login-box--shake {
+  animation: shake 0.4s ease-in-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-12px); }
+  40% { transform: translateX(10px); }
+  60% { transform: translateX(-8px); }
+  80% { transform: translateX(6px); }
 }
 
 .admin-page {
@@ -749,4 +859,58 @@ a {
   .admin-header {
     flex-direction: column;
   }
+}
+
+/* Hidden admin tap zone – positioned over panda head area */
+.admin-tap-zone {
+  position: absolute;
+  top: 8%;
+  left: 30%;
+  width: 40%;
+  height: 30%;
+  z-index: 3;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Inactivity countdown overlay */
+.idle-countdown-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.idle-countdown-overlay__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  user-select: none;
+}
+
+.idle-countdown-overlay__number {
+  font-size: clamp(4rem, 14vw, 9rem);
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
+  text-shadow: 0 0 32px rgba(120, 220, 255, 0.5);
+  animation: countdown-pulse 1s ease-in-out infinite;
+}
+
+.idle-countdown-overlay__text {
+  font-size: clamp(1.1rem, 3.6vw, 1.6rem);
+  color: rgba(255, 255, 255, 0.88);
+  text-align: center;
+}
+
+@keyframes countdown-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.08); opacity: 0.82; }
 }

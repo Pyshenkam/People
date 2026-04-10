@@ -7,7 +7,16 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_va
 
 ModelFamily = Literal["O", "O2.0", "SC", "SC2.0"]
 PlaybackTone = Literal["natural", "panda_warm"]
-AutoEndMode = Literal["silence_timeout", "disconnect_only"]
+AutoEndMode = Literal["screen_idle", "disconnect_only"]
+UpstreamMode = Literal["mock", "volcengine", "qwen"]
+
+DEFAULT_REALTIME_BASE_URL = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
+DEFAULT_REALTIME_RESOURCE_ID = "volc.speech.dialog"
+DEFAULT_REALTIME_APP_KEY = "PlgvMymc7f3tQnJ6"
+
+DEFAULT_QWEN_BASE_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+DEFAULT_QWEN_MODEL = "qwen3.5-omni-flash-realtime"
+DEFAULT_QWEN_VOICE = "Momo"
 
 DEFAULT_SPEAKER_BY_FAMILY: dict[ModelFamily, str] = {
     "O": "zh_male_xiaotian_jupiter_bigtts",
@@ -21,6 +30,15 @@ def _strip_text(value: str | None) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def mask_secret(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        return ""
+    if len(normalized) <= 8:
+        return "*" * len(normalized)
+    return f"{normalized[:3]}***{normalized[-3:]}"
+
+
 class LocationConfig(BaseModel):
     city: str = "北京"
     province: str | None = None
@@ -31,22 +49,29 @@ class LocationConfig(BaseModel):
 
 class MuseumConfig(BaseModel):
     display_title: str = "科技馆数字人"
-    display_subtitle: str = "点击开始对话，进入实时语音讲解"
+    display_subtitle: str = "点击开始，和我一起玩猜年龄游戏吧！"
     avatar_url: str | None = None
-    idle_timeout_sec: int = 7
-    auto_end_mode: AutoEndMode = "silence_timeout"
-    welcome_text: str = "你好，欢迎来到科技馆。点击开始对话后，我会实时听你说话。"
+    idle_timeout_sec: int = 60
+    auto_end_mode: AutoEndMode = "screen_idle"
+    welcome_text: str = "你好呀！我是小熊猫，我有一个超厉害的本领——猜年龄！我能通过几个小问题猜出你的年龄，要不要试试？"
     model_family: ModelFamily = "O2.0"
     model: str | None = None
     speaker: str = "zh_male_xiaotian_jupiter_bigtts"
     playback_tone: PlaybackTone = "panda_warm"
-    bot_name: str = "星馆助手"
-    system_role: str = "你是科技馆展厅里的数字讲解员，擅长用亲切、准确、口语化的方式介绍科技展品。"
-    speaking_style: str = "回答简洁自然，适合面对面讲解，优先使用中文。"
+    bot_name: str = "小熊猫"
+    system_role: str = "你是一只可爱的小熊猫，擅长猜年龄。规则：绝对不能直接问年龄、几岁、生日、上几年级。通过轻松自然的闲聊间接推理对方的年龄，每次只问一个开放式问题，根据回答自然接话再聊下一个话题。当你有足够信心确定对方年龄时再公布猜测，说出你的推理过程让对方觉得好神奇。猜对了开心庆祝，猜错了俏皮说差一点点。\n首轮开场方向（每次随机选一个，不要重复）：影视、音乐、美食、旅行、动物、运动、游戏、阅读、社交、日常作息、消费习惯、兴趣爱好、学习工作、时尚穿搭、科技数码。"
+    speaking_style: str = "语气活泼自然，句子简短，根据对方的回答风格自动调整语气，优先使用中文。"
     character_manifest: str | None = None
     strict_audit: bool = False
     enable_user_query_exit: bool = False
     location: LocationConfig = Field(default_factory=LocationConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_auto_end_mode(cls, data: dict) -> dict:  # type: ignore[override]
+        if isinstance(data, dict) and data.get("auto_end_mode") == "silence_timeout":
+            data["auto_end_mode"] = "screen_idle"
+        return data
 
     @field_validator("display_title")
     @classmethod
@@ -86,7 +111,7 @@ class MuseumConfig(BaseModel):
     @classmethod
     def ensure_idle_timeout_sec(cls, value: int) -> int:
         if value < 5 or value > 600:
-            raise ValueError("静默超时需在 5 到 600 秒之间。")
+            raise ValueError("无操作超时需在 5 到 600 秒之间。")
         return value
 
     @field_validator("system_role")
@@ -95,7 +120,7 @@ class MuseumConfig(BaseModel):
         value = _strip_text(value)
         family = info.data.get("model_family")
         if family in {"O", "O2.0"} and not value:
-            raise ValueError("讲解角色设定不能为空。")
+            raise ValueError("角色人设不能为空。")
         return value
 
     @field_validator("speaking_style")
@@ -104,7 +129,7 @@ class MuseumConfig(BaseModel):
         value = _strip_text(value)
         family = info.data.get("model_family")
         if family in {"O", "O2.0"} and not value:
-            raise ValueError("回答风格不能为空。")
+            raise ValueError("互动风格不能为空。")
         return value
 
     @field_validator("character_manifest")
@@ -169,6 +194,121 @@ class MuseumConfig(BaseModel):
             },
             "dialog": dialog_payload,
         }
+
+
+class RealtimeUpstreamConfig(BaseModel):
+    mode: UpstreamMode = "mock"
+    base_url: str = DEFAULT_REALTIME_BASE_URL
+    app_id: str = ""
+    access_key: str = ""
+    resource_id: str = DEFAULT_REALTIME_RESOURCE_ID
+    app_key: str = DEFAULT_REALTIME_APP_KEY
+    qwen_api_key: str = ""
+    qwen_base_url: str = DEFAULT_QWEN_BASE_URL
+    qwen_model: str = DEFAULT_QWEN_MODEL
+    qwen_voice: str = DEFAULT_QWEN_VOICE
+
+    @field_validator("base_url")
+    @classmethod
+    def normalize_base_url(cls, value: str) -> str:
+        return _strip_text(value) or DEFAULT_REALTIME_BASE_URL
+
+    @field_validator("resource_id")
+    @classmethod
+    def normalize_resource_id(cls, value: str) -> str:
+        return _strip_text(value) or DEFAULT_REALTIME_RESOURCE_ID
+
+    @field_validator("app_key")
+    @classmethod
+    def normalize_app_key(cls, value: str) -> str:
+        return _strip_text(value) or DEFAULT_REALTIME_APP_KEY
+
+    @field_validator("app_id")
+    @classmethod
+    def ensure_app_id(cls, value: str, info: ValidationInfo) -> str:
+        normalized = _strip_text(value)
+        if info.data.get("mode") == "volcengine" and not normalized:
+            raise ValueError("App ID 不能为空。")
+        return normalized
+
+    @field_validator("access_key")
+    @classmethod
+    def ensure_access_key(cls, value: str, info: ValidationInfo) -> str:
+        normalized = _strip_text(value)
+        if info.data.get("mode") == "volcengine" and not normalized:
+            raise ValueError("Access Key 不能为空。")
+        return normalized
+
+    @field_validator("qwen_api_key")
+    @classmethod
+    def ensure_qwen_api_key(cls, value: str, info: ValidationInfo) -> str:
+        normalized = _strip_text(value)
+        if info.data.get("mode") == "qwen" and not normalized:
+            raise ValueError("DashScope API Key 不能为空。")
+        return normalized
+
+
+class UpstreamConfigSnapshot(BaseModel):
+    config: RealtimeUpstreamConfig
+    updated_at: datetime
+    updated_by: str | None = None
+
+
+class UpstreamConfigResponse(BaseModel):
+    mode: UpstreamMode
+    base_url: str
+    app_id: str
+    resource_id: str
+    app_key: str
+    access_key_configured: bool
+    access_key_masked: str | None = None
+    qwen_base_url: str = DEFAULT_QWEN_BASE_URL
+    qwen_model: str = DEFAULT_QWEN_MODEL
+    qwen_voice: str = DEFAULT_QWEN_VOICE
+    qwen_api_key_configured: bool = False
+    qwen_api_key_masked: str | None = None
+    updated_at: datetime
+    updated_by: str | None = None
+
+
+class UpstreamConfigUpdateRequest(BaseModel):
+    mode: UpstreamMode = "mock"
+    base_url: str = DEFAULT_REALTIME_BASE_URL
+    app_id: str = ""
+    access_key: str | None = None
+    resource_id: str = DEFAULT_REALTIME_RESOURCE_ID
+    app_key: str = DEFAULT_REALTIME_APP_KEY
+    qwen_api_key: str | None = None
+    qwen_base_url: str = DEFAULT_QWEN_BASE_URL
+    qwen_model: str = DEFAULT_QWEN_MODEL
+    qwen_voice: str = DEFAULT_QWEN_VOICE
+
+    @field_validator("base_url")
+    @classmethod
+    def normalize_update_base_url(cls, value: str) -> str:
+        return _strip_text(value) or DEFAULT_REALTIME_BASE_URL
+
+    @field_validator("app_id")
+    @classmethod
+    def normalize_update_app_id(cls, value: str) -> str:
+        return _strip_text(value)
+
+    @field_validator("access_key")
+    @classmethod
+    def normalize_update_access_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _strip_text(value)
+
+    @field_validator("resource_id")
+    @classmethod
+    def normalize_update_resource_id(cls, value: str) -> str:
+        return _strip_text(value) or DEFAULT_REALTIME_RESOURCE_ID
+
+    @field_validator("app_key")
+    @classmethod
+    def normalize_update_app_key(cls, value: str) -> str:
+        return _strip_text(value) or DEFAULT_REALTIME_APP_KEY
 
 class ConfigSnapshot(BaseModel):
     version: int

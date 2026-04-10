@@ -11,7 +11,18 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from .logging_utils import configure_logging, get_logger
-from .schemas import AdminLoginRequest, AdminSessionStatus, ConfigBundle, MuseumConfig, PublicConfigResponse
+from .schemas import (
+    AdminLoginRequest,
+    AdminSessionStatus,
+    ConfigBundle,
+    MuseumConfig,
+    PublicConfigResponse,
+    RealtimeUpstreamConfig,
+    UpstreamConfigResponse,
+    UpstreamConfigSnapshot,
+    UpstreamConfigUpdateRequest,
+    mask_secret,
+)
 from .security import AdminSecurity
 from .session_manager import RealtimeSessionManager, SessionHandle
 from .settings import Settings
@@ -30,6 +41,12 @@ FIELD_LABELS = {
     "system_role": "讲解角色设定",
     "speaking_style": "回答风格",
     "character_manifest": "角色设定",
+    "mode": "运行模式",
+    "base_url": "WebSocket 地址",
+    "app_id": "App ID",
+    "access_key": "Access Key",
+    "resource_id": "Resource ID",
+    "app_key": "App Key",
 }
 
 
@@ -50,6 +67,8 @@ def normalize_validation_message(field_name: str, error: dict) -> str:
             return "请选择有效的自动结束模式。"
         if field_name == "model_family":
             return "请选择有效的模型版本。"
+        if field_name == "mode":
+            return "请选择有效的运行模式。"
 
     if error_type in {"missing", "string_too_short"}:
         return f"{label}不能为空。"
@@ -77,6 +96,25 @@ def build_validation_detail(exc: ValidationError) -> dict:
     }
 
 
+def build_upstream_response(snapshot: UpstreamConfigSnapshot) -> UpstreamConfigResponse:
+    return UpstreamConfigResponse(
+        mode=snapshot.config.mode,
+        base_url=snapshot.config.base_url,
+        app_id=snapshot.config.app_id,
+        resource_id=snapshot.config.resource_id,
+        app_key=snapshot.config.app_key,
+        access_key_configured=bool(snapshot.config.access_key),
+        access_key_masked=mask_secret(snapshot.config.access_key) or None,
+        qwen_base_url=snapshot.config.qwen_base_url,
+        qwen_model=snapshot.config.qwen_model,
+        qwen_voice=snapshot.config.qwen_voice,
+        qwen_api_key_configured=bool(snapshot.config.qwen_api_key),
+        qwen_api_key_masked=mask_secret(snapshot.config.qwen_api_key) or None,
+        updated_at=snapshot.updated_at,
+        updated_by=snapshot.updated_by,
+    )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
 
@@ -87,13 +125,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.security = AdminSecurity(settings)
         app.state.store = ConfigStore(settings.database_path)
         password_hash = app.state.security.hash_password(settings.admin_password)
-        app.state.store.initialize(settings.default_config, password_hash)
+        app.state.store.initialize(settings.default_config, password_hash, settings.build_upstream_config())
+        app.state.settings.apply_upstream_config(app.state.store.get_upstream_config().config)
         app.state.sessions = RealtimeSessionManager(settings, app.state.store)
         logger.info(
-            "app_started upstream_mode=%s log_file=%s base_url=%s",
+            "app_started upstream_mode=%s log_file=%s base_url=%s frontend_dist=%s dist_exists=%s frozen=%s",
             settings.upstream_mode,
             settings.log_file_path,
             settings.upstream_base_url,
+            settings.frontend_dist_dir,
+            settings.frontend_dist_dir.exists(),
+            getattr(__import__("sys"), "frozen", False),
         )
         yield
 
@@ -111,6 +153,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def validate_config_payload(body: object) -> MuseumConfig:
         try:
             return MuseumConfig.model_validate(body)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=build_validation_detail(exc)) from exc
+
+    def validate_upstream_payload(body: object) -> UpstreamConfigUpdateRequest:
+        try:
+            return UpstreamConfigUpdateRequest.model_validate(body)
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=build_validation_detail(exc)) from exc
 
@@ -211,6 +259,54 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         items = get_store().list_published()
         return [item.model_dump(mode="json") for item in items]
 
+    @app.get("/api/admin/upstream-config", response_model=UpstreamConfigResponse)
+    async def get_admin_upstream_config(request: Request) -> UpstreamConfigResponse:
+        get_security().require_admin(request)
+        return build_upstream_response(get_store().get_upstream_config())
+
+    @app.put("/api/admin/upstream-config")
+    async def update_admin_upstream_config(request: Request) -> dict:
+        security = get_security()
+        security.validate_csrf(request)
+        security.require_admin(request)
+        body = await request.json()
+        payload = validate_upstream_payload(body)
+        current = get_store().get_upstream_config().config
+        effective_access_key = payload.access_key if payload.access_key not in {None, ""} else current.access_key
+        effective_qwen_api_key = payload.qwen_api_key if payload.qwen_api_key not in {None, ""} else current.qwen_api_key
+        try:
+            next_config = RealtimeUpstreamConfig.model_validate(
+                {
+                    "mode": payload.mode,
+                    "base_url": payload.base_url,
+                    "app_id": payload.app_id,
+                    "access_key": effective_access_key,
+                    "resource_id": payload.resource_id,
+                    "app_key": payload.app_key,
+                    "qwen_api_key": effective_qwen_api_key,
+                    "qwen_base_url": payload.qwen_base_url,
+                    "qwen_model": payload.qwen_model,
+                    "qwen_voice": payload.qwen_voice,
+                }
+            )
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=build_validation_detail(exc)) from exc
+
+        snapshot = get_store().save_upstream_config(next_config, updated_by="admin")
+        app.state.settings.apply_upstream_config(snapshot.config)
+        logger.info(
+            "admin_upstream_config_updated mode=%s base_url=%s app_id=%s resource_id=%s access_key_configured=%s",
+            snapshot.config.mode,
+            snapshot.config.base_url,
+            snapshot.config.app_id,
+            snapshot.config.resource_id,
+            bool(snapshot.config.access_key),
+        )
+        return {
+            "updatedAt": snapshot.updated_at.isoformat(),
+            "mode": snapshot.config.mode,
+        }
+
     @app.post("/api/admin/session/reset")
     async def reset_runtime_session(request: Request) -> dict:
         security = get_security()
@@ -306,7 +402,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 context.client_id,
                 context.session.session_id if context.session is not None else None,
             )
-            pass
         finally:
             if context.session is not None:
                 await sessions.detach(context.session, websocket)
@@ -325,6 +420,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return FileResponse(dist_dir / "index.html")
 
     else:
+
         @app.get("/")
         async def no_frontend() -> dict:
             return {

@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Form, Input, Typography, message } from "antd";
+import { Button, Form, Input, message } from "antd";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchAdminSession, loginAdmin } from "../lib/api";
@@ -8,6 +8,7 @@ export function AdminLoginPage() {
   const [csrfToken, setCsrfToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [shake, setShake] = useState(false);
 
   useEffect(() => {
     void fetchAdminSession().then((status) => {
@@ -20,12 +21,9 @@ export function AdminLoginPage() {
 
   return (
     <main className="admin-shell">
-      <Card className="admin-login-card">
-        <Typography.Text className="eyebrow">ADMIN ACCESS</Typography.Text>
-        <Typography.Title level={2}>后台登录</Typography.Title>
-        <Typography.Paragraph>
-          每次进入后台都需要输入管理员密码。登录后可以修改提示词、人设、欢迎语和自动结束策略。
-        </Typography.Paragraph>
+      <div className={`login-box${shake ? " login-box--shake" : ""}`} onAnimationEnd={() => setShake(false)}>
+        <div className="login-box__icon">🔒</div>
+        <h2 className="login-box__title">管理后台</h2>
         <Form
           layout="vertical"
           onFinish={async (values) => {
@@ -35,26 +33,32 @@ export function AdminLoginPage() {
               await loginAdmin(values.password, csrfToken);
               message.success("登录成功");
               void navigate("/admin", { replace: true });
-            } catch (requestError) {
-              setError(requestError instanceof Error ? requestError.message : "登录失败。");
+            } catch {
+              setError("密码错误，请重试");
+              setShake(true);
             } finally {
               setLoading(false);
             }
           }}
         >
-          <Form.Item
-            label="管理员密码"
-            name="password"
-            rules={[{ required: true, message: "请输入管理员密码" }]}
-          >
-            <Input.Password autoFocus autoComplete="current-password" size="large" />
+          <Form.Item name="password" rules={[{ required: true, message: "请输入密码" }]}>
+            <Input.Password
+              autoFocus
+              autoComplete="current-password"
+              size="large"
+              placeholder="输入管理密码"
+              status={error ? "error" : undefined}
+            />
           </Form.Item>
-          {error ? <Alert type="error" showIcon message={error} /> : null}
+          {error ? <p className="login-box__error">{error}</p> : null}
           <Button type="primary" htmlType="submit" size="large" loading={loading} block>
-            进入后台
+            进入
           </Button>
         </Form>
-      </Card>
+        <button className="login-box__back" type="button" onClick={() => void navigate("/", { replace: true })}>
+          ← 返回游戏
+        </button>
+      </div>
     </main>
   );
 }

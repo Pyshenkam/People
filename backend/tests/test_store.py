@@ -2,8 +2,8 @@ from pathlib import Path
 
 import bootstrap_defaults
 from app.security import AdminSecurity
+from app.schemas import MuseumConfig, RealtimeUpstreamConfig
 from app.settings import Settings
-from app.schemas import MuseumConfig
 from app.store import ConfigStore
 
 
@@ -67,5 +67,29 @@ def test_bootstrap_defaults_preserves_existing_config(tmp_path: Path, monkeypatc
 def test_museum_config_defaults_use_shorter_idle_timeout() -> None:
     config = MuseumConfig()
 
-    assert config.idle_timeout_sec == 7
-    assert config.auto_end_mode == "silence_timeout"
+    assert config.idle_timeout_sec == 60
+    assert config.auto_end_mode == "screen_idle"
+
+
+def test_config_store_preserves_existing_upstream_config(tmp_path: Path) -> None:
+    store = ConfigStore(tmp_path / "museum.db")
+    initial = RealtimeUpstreamConfig(
+        mode="volcengine",
+        app_id="app-initial",
+        access_key="access-key-initial",
+    )
+    updated = RealtimeUpstreamConfig(
+        mode="volcengine",
+        app_id="app-updated",
+        access_key="access-key-updated",
+    )
+
+    store.initialize(MuseumConfig(), "hash", initial)
+    store.save_upstream_config(updated, updated_by="tester")
+    store.initialize(MuseumConfig(), "hash", RealtimeUpstreamConfig())
+
+    snapshot = store.get_upstream_config()
+    assert snapshot.config.mode == "volcengine"
+    assert snapshot.config.app_id == "app-updated"
+    assert snapshot.config.access_key == "access-key-updated"
+    assert snapshot.updated_by == "tester"

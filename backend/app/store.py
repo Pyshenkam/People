@@ -7,7 +7,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterator
 
-from .schemas import ConfigHistoryItem, ConfigSnapshot, DraftSnapshot, MuseumConfig
+from .schemas import (
+    ConfigHistoryItem,
+    ConfigSnapshot,
+    DraftSnapshot,
+    MuseumConfig,
+    RealtimeUpstreamConfig,
+    UpstreamConfigSnapshot,
+)
 
 LEGACY_AVATAR_URLS = {None, "", "/models/default-avatar.glb"}
 
@@ -87,10 +94,17 @@ class ConfigStore:
         finally:
             conn.close()
 
-    def initialize(self, default_config: MuseumConfig, password_hash: str) -> None:
+    def initialize(
+        self,
+        default_config: MuseumConfig,
+        password_hash: str,
+        default_upstream_config: RealtimeUpstreamConfig | None = None,
+    ) -> None:
         now = utcnow().isoformat()
         default_config = self._normalize_avatar_url(default_config, default_config.avatar_url)
         payload = json.dumps(default_config.model_dump(mode="json"), ensure_ascii=False)
+        upstream_config = default_upstream_config or RealtimeUpstreamConfig()
+        upstream_payload = json.dumps(upstream_config.model_dump(mode="json"), ensure_ascii=False)
         with self.connect() as conn:
             conn.executescript(
                 """
@@ -112,6 +126,13 @@ class ConfigStore:
                     payload_json TEXT NOT NULL,
                     published_at TEXT NOT NULL,
                     published_by TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS upstream_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    updated_by TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS session_events (
@@ -158,6 +179,16 @@ class ConfigStore:
                     (payload, now, "system"),
                 )
 
+            upstream_row = conn.execute("SELECT id FROM upstream_config WHERE id = 1").fetchone()
+            if upstream_row is None:
+                conn.execute(
+                    """
+                    INSERT INTO upstream_config (id, payload_json, updated_at, updated_by)
+                    VALUES (1, ?, ?, ?)
+                    """,
+                    (upstream_payload, now, "system"),
+                )
+
             self._upgrade_existing_avatar_url(conn, default_config.avatar_url, now)
 
     def get_admin_password_hash(self) -> str:
@@ -188,6 +219,40 @@ class ConfigStore:
             conn.execute(
                 """
                 UPDATE draft_config
+                SET payload_json = ?, updated_at = ?, updated_by = ?
+                WHERE id = 1
+                """,
+                (
+                    json.dumps(config.model_dump(mode="json"), ensure_ascii=False),
+                    snapshot.updated_at.isoformat(),
+                    updated_by,
+                ),
+            )
+        return snapshot
+
+    def get_upstream_config(self) -> UpstreamConfigSnapshot:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json, updated_at, updated_by FROM upstream_config WHERE id = 1"
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("upstream config is not initialized")
+        return UpstreamConfigSnapshot(
+            config=RealtimeUpstreamConfig.model_validate_json(row["payload_json"]),
+            updated_at=datetime.fromisoformat(str(row["updated_at"])),
+            updated_by=row["updated_by"],
+        )
+
+    def save_upstream_config(
+        self,
+        config: RealtimeUpstreamConfig,
+        updated_by: str,
+    ) -> UpstreamConfigSnapshot:
+        snapshot = UpstreamConfigSnapshot(config=config, updated_at=utcnow(), updated_by=updated_by)
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE upstream_config
                 SET payload_json = ?, updated_at = ?, updated_by = ?
                 WHERE id = 1
                 """,

@@ -67,10 +67,10 @@ def test_realtime_greeting_subtitles_are_accumulated(tmp_path: Path) -> None:
             assert all(texts[index + 1].startswith(texts[index]) for index in range(len(texts) - 1))
 
 
-def test_realtime_session_closes_on_idle_timeout(tmp_path: Path) -> None:
+def test_realtime_session_screen_idle_does_not_close_on_heartbeat(tmp_path: Path) -> None:
     settings = build_settings(tmp_path)
     settings.default_config = settings.default_config.model_copy(
-        update={"idle_timeout_sec": 7, "auto_end_mode": "silence_timeout"}
+        update={"idle_timeout_sec": 60, "auto_end_mode": "screen_idle"}
     )
     app = create_app(settings)
     with TestClient(app) as client:
@@ -80,7 +80,7 @@ def test_realtime_session_closes_on_idle_timeout(tmp_path: Path) -> None:
 
             ready_event = websocket.receive_json()
             assert ready_event["type"] == "session_ready"
-            assert ready_event["autoEndMode"] == "silence_timeout"
+            assert ready_event["autoEndMode"] == "screen_idle"
 
             while True:
                 payload = websocket.receive_json()
@@ -92,11 +92,18 @@ def test_realtime_session_closes_on_idle_timeout(tmp_path: Path) -> None:
             handle.last_activity_at -= handle.config.idle_timeout_sec + 1
 
             websocket.send_json({"type": "heartbeat"})
+            time.sleep(0.05)
+
+            active = app.state.sessions._active
+            assert active is not None
+            assert not active.closed
+
+            websocket.send_json({"type": "end_session", "reason": "manual_end"})
 
             while True:
                 payload = websocket.receive_json()
                 if payload["type"] == "session_closed":
-                    assert payload["reason"] == "idle_timeout"
+                    assert payload["reason"] == "manual_end"
                     break
 
 

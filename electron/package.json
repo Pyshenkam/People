@@ -1,0 +1,22 @@
+{
+  "name": "science-museum-digital-human",
+  "version": "1.0.0",
+  "description": "科技馆数字人讲解系统桌面应用",
+  "main": "dist/main.js",
+  "author": "Science Museum",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "start": "electron .",
+    "pack": "node build-script.js"
+  },
+  "dependencies": {
+    "electron-squirrel-startup": "^1.0.1"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.5.0",
+    "@types/node": "^20.14.0"
+  }
+}

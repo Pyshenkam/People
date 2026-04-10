@@ -9,7 +9,11 @@ def main() -> None:
     settings = Settings.from_env()
     security = AdminSecurity(settings)
     store = ConfigStore(settings.database_path)
-    store.initialize(settings.default_config, security.hash_password(settings.admin_password))
+    store.initialize(
+        settings.default_config,
+        security.hash_password(settings.admin_password),
+        settings.build_upstream_config(),
+    )
     published = store.get_published()
     draft = store.get_draft()
     print(

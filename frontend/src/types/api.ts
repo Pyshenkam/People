@@ -1,6 +1,7 @@
 export type ModelFamily = "O" | "O2.0" | "SC" | "SC2.0";
 export type PlaybackTone = "panda_warm";
-export type AutoEndMode = "silence_timeout" | "disconnect_only";
+export type AutoEndMode = "screen_idle" | "disconnect_only";
+export type UpstreamMode = "mock" | "volcengine" | "qwen";
 
 export interface LocationConfig {
   city: string;
@@ -64,6 +65,36 @@ export interface ConfigHistoryItem {
   config: MuseumConfig;
   published_at: string;
   published_by?: string | null;
+}
+
+export interface UpstreamConfigResponse {
+  mode: UpstreamMode;
+  base_url: string;
+  app_id: string;
+  resource_id: string;
+  app_key: string;
+  access_key_configured: boolean;
+  access_key_masked?: string | null;
+  qwen_base_url: string;
+  qwen_model: string;
+  qwen_voice: string;
+  qwen_api_key_configured: boolean;
+  qwen_api_key_masked?: string | null;
+  updated_at: string;
+  updated_by?: string | null;
+}
+
+export interface UpstreamConfigUpdateRequest {
+  mode: UpstreamMode;
+  base_url: string;
+  app_id: string;
+  access_key?: string;
+  resource_id: string;
+  app_key: string;
+  qwen_api_key?: string;
+  qwen_base_url: string;
+  qwen_model: string;
+  qwen_voice: string;
 }
 
 export type VisitorPhase =

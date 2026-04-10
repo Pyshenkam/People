@@ -192,6 +192,18 @@ function phasePulse(duration: number, phaseElapsed: number): number {
   return Math.sin((phaseElapsed / duration) * Math.PI);
 }
 
+function resolveJawOpen(bindings: AvatarBindings, level: number, speechShape: number): number {
+  if (speechShape <= 0.01) {
+    return bindings.mouthMorph ? 0.004 : 0.01;
+  }
+
+  if (!bindings.mouthMorph) {
+    return THREE.MathUtils.clamp(0.14 + speechShape * 0.18 + level * 0.32, 0.08, 0.52);
+  }
+
+  return 0.012 + level * 0.05 * (0.35 + speechShape * 0.65);
+}
+
 export function inspectAvatar(root: THREE.Object3D, animations: THREE.AnimationClip[]): AvatarBindings {
   const bindings: AvatarBindings = {
     blinkMorphs: [],
@@ -274,10 +286,7 @@ export function driveAvatar(bindings: AvatarBindings, state: AvatarDriveState): 
   }
 
   if (bindings.jawBone) {
-    const jawOpen =
-      speechShape > 0.01
-        ? 0.012 + level * 0.05 * (0.35 + speechShape * 0.65)
-        : 0.004;
+    const jawOpen = resolveJawOpen(bindings, level, speechShape);
     applyRotation(bindings.jawBone, delta, jawOpen, 0, 0, 14);
   }
 

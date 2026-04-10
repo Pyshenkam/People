@@ -14,7 +14,18 @@ def build_settings(tmp_path: Path) -> Settings:
     settings.admin_password = "MuseumAdmin123!"
     settings.session_secret = "test-secret"
     settings.upstream_mode = "mock"
+    settings.upstream_app_id = ""
+    settings.upstream_access_key = ""
     return settings
+
+
+def login_admin(client: TestClient, csrf_token: str) -> None:
+    response = client.post(
+        "/api/admin/login",
+        json={"password": "MuseumAdmin123!"},
+        headers={"x-csrf-token": csrf_token},
+    )
+    assert response.status_code == 200
 
 
 def test_admin_login_and_config(tmp_path: Path) -> None:
@@ -22,12 +33,7 @@ def test_admin_login_and_config(tmp_path: Path) -> None:
     with TestClient(app) as client:
         session_response = client.get("/api/admin/session")
         csrf_token = session_response.json()["csrf_token"]
-        login = client.post(
-            "/api/admin/login",
-            json={"password": "MuseumAdmin123!"},
-            headers={"x-csrf-token": csrf_token},
-        )
-        assert login.status_code == 200
+        login_admin(client, csrf_token)
 
         config = client.get("/api/admin/config")
         assert config.status_code == 200
@@ -55,11 +61,7 @@ def test_publish_persists_o20_prompt_fields(tmp_path: Path) -> None:
     with TestClient(app) as client:
         session_response = client.get("/api/admin/session")
         csrf_token = session_response.json()["csrf_token"]
-        client.post(
-            "/api/admin/login",
-            json={"password": "MuseumAdmin123!"},
-            headers={"x-csrf-token": csrf_token},
-        )
+        login_admin(client, csrf_token)
 
         config = client.get("/api/admin/config")
         payload = config.json()["published"]["config"]
@@ -91,11 +93,7 @@ def test_publish_rejects_blank_prompt_fields_with_chinese_errors(tmp_path: Path)
     with TestClient(app, raise_server_exceptions=False) as client:
         session_response = client.get("/api/admin/session")
         csrf_token = session_response.json()["csrf_token"]
-        client.post(
-            "/api/admin/login",
-            json={"password": "MuseumAdmin123!"},
-            headers={"x-csrf-token": csrf_token},
-        )
+        login_admin(client, csrf_token)
 
         config = client.get("/api/admin/config")
         payload = config.json()["published"]["config"]
@@ -114,3 +112,98 @@ def test_publish_rejects_blank_prompt_fields_with_chinese_errors(tmp_path: Path)
         assert detail["message"] == "发布失败，请先检查标红字段。"
         assert detail["fieldErrors"]["system_role"] == ["讲解角色设定不能为空。"]
         assert detail["fieldErrors"]["speaking_style"] == ["回答风格不能为空。"]
+
+
+def test_admin_can_update_upstream_config(tmp_path: Path) -> None:
+    app = create_app(build_settings(tmp_path))
+    with TestClient(app) as client:
+        session_response = client.get("/api/admin/session")
+        csrf_token = session_response.json()["csrf_token"]
+        login_admin(client, csrf_token)
+
+        upstream_config = client.get("/api/admin/upstream-config")
+        assert upstream_config.status_code == 200
+        assert upstream_config.json()["mode"] == "mock"
+        assert upstream_config.json()["access_key_configured"] is False
+
+        update = client.put(
+            "/api/admin/upstream-config",
+            json={
+                "mode": "volcengine",
+                "base_url": "wss://openspeech.bytedance.com/api/v3/realtime/dialogue",
+                "app_id": "app-live-001",
+                "access_key": "access-key-live-001",
+                "resource_id": "volc.speech.dialog",
+                "app_key": "PlgvMymc7f3tQnJ6",
+            },
+            headers={"x-csrf-token": csrf_token},
+        )
+        assert update.status_code == 200
+
+        refreshed = client.get("/api/admin/upstream-config")
+        assert refreshed.status_code == 200
+        payload = refreshed.json()
+        assert payload["mode"] == "volcengine"
+        assert payload["app_id"] == "app-live-001"
+        assert payload["access_key_configured"] is True
+        assert payload["access_key_masked"] != "access-key-live-001"
+
+        assert app.state.settings.upstream_mode == "volcengine"
+        assert app.state.settings.upstream_app_id == "app-live-001"
+        assert app.state.settings.upstream_access_key == "access-key-live-001"
+        assert client.get("/api/health").json()["upstreamMode"] == "volcengine"
+
+
+def test_admin_upstream_update_keeps_existing_access_key_when_left_blank(tmp_path: Path) -> None:
+    settings = build_settings(tmp_path)
+    settings.upstream_mode = "volcengine"
+    settings.upstream_app_id = "app-initial"
+    settings.upstream_access_key = "access-key-initial"
+    app = create_app(settings)
+    with TestClient(app) as client:
+        session_response = client.get("/api/admin/session")
+        csrf_token = session_response.json()["csrf_token"]
+        login_admin(client, csrf_token)
+
+        update = client.put(
+            "/api/admin/upstream-config",
+            json={
+                "mode": "volcengine",
+                "base_url": "wss://openspeech.bytedance.com/api/v3/realtime/dialogue",
+                "app_id": "app-rotated",
+                "access_key": "",
+                "resource_id": "volc.speech.dialog",
+                "app_key": "PlgvMymc7f3tQnJ6",
+            },
+            headers={"x-csrf-token": csrf_token},
+        )
+        assert update.status_code == 200
+
+        assert app.state.settings.upstream_app_id == "app-rotated"
+        assert app.state.settings.upstream_access_key == "access-key-initial"
+
+
+def test_admin_upstream_update_rejects_missing_access_key_in_volcengine_mode(tmp_path: Path) -> None:
+    app = create_app(build_settings(tmp_path))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        session_response = client.get("/api/admin/session")
+        csrf_token = session_response.json()["csrf_token"]
+        login_admin(client, csrf_token)
+
+        update = client.put(
+            "/api/admin/upstream-config",
+            json={
+                "mode": "volcengine",
+                "base_url": "wss://openspeech.bytedance.com/api/v3/realtime/dialogue",
+                "app_id": "app-live-002",
+                "access_key": "",
+                "resource_id": "volc.speech.dialog",
+                "app_key": "PlgvMymc7f3tQnJ6",
+            },
+            headers={"x-csrf-token": csrf_token},
+        )
+        assert update.status_code == 422
+
+        detail = update.json()["detail"]
+        assert detail["message"] == "发布失败，请先检查标红字段。"
+        assert detail["fieldErrors"]["access_key"] == ["Access Key 不能为空。"]

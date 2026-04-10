@@ -4,6 +4,8 @@ import type {
   ConfigHistoryItem,
   MuseumConfig,
   PublicConfigResponse,
+  UpstreamConfigResponse,
+  UpstreamConfigUpdateRequest,
 } from "../types/api";
 
 export type ApiFieldErrors = Record<string, string[]>;
@@ -138,6 +140,25 @@ export async function publishDraft(
 export async function fetchHistory(): Promise<ConfigHistoryItem[]> {
   return requestJson<ConfigHistoryItem[]>("/api/admin/config/history", {
     headers: {},
+  });
+}
+
+export async function fetchUpstreamConfig(): Promise<UpstreamConfigResponse> {
+  return requestJson<UpstreamConfigResponse>("/api/admin/upstream-config", {
+    headers: {},
+  });
+}
+
+export async function updateUpstreamConfig(
+  config: UpstreamConfigUpdateRequest,
+  csrfToken: string,
+): Promise<{ updatedAt: string; mode: string }> {
+  return requestJson<{ updatedAt: string; mode: string }>("/api/admin/upstream-config", {
+    method: "PUT",
+    headers: {
+      "X-CSRF-Token": csrfToken,
+    },
+    body: JSON.stringify(config),
   });
 }
 

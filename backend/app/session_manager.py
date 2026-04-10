@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from .logging_utils import get_logger
-from .realtime.upstream import MockRealtimeClient, VolcengineRealtimeClient, create_upstream_client
+from .realtime.upstream import MockRealtimeClient, QwenRealtimeClient, VolcengineRealtimeClient, create_upstream_client
 from .schemas import MuseumConfig
 from .settings import Settings
 from .store import ConfigStore
@@ -27,7 +27,7 @@ class SessionHandle:
     config_version: int
     config: MuseumConfig
     websocket: WebSocket | None
-    upstream: MockRealtimeClient | VolcengineRealtimeClient
+    upstream: MockRealtimeClient | VolcengineRealtimeClient | QwenRealtimeClient
     created_at: float = field(default_factory=time.monotonic)
     last_activity_at: float = field(default_factory=time.monotonic)
     state: str = "opening_session"
@@ -118,11 +118,10 @@ class RealtimeSessionManager:
             timeout = self.settings.upstream_connect_timeout_seconds
             try:
                 await asyncio.wait_for(handle.upstream.connect(), timeout=timeout)
+                await asyncio.wait_for(handle.upstream.start_session(handle.config, handle.session_id), timeout=timeout)
                 if isinstance(handle.upstream, MockRealtimeClient):
-                    await asyncio.wait_for(handle.upstream.start_session(handle.config, handle.session_id), timeout=timeout)
                     await asyncio.wait_for(handle.upstream.say_hello(handle.config.welcome_text), timeout=timeout)
                 else:
-                    await asyncio.wait_for(handle.upstream.start_session(handle.config, handle.session_id), timeout=timeout)
                     await asyncio.wait_for(handle.upstream.say_hello(handle.config.welcome_text, handle.session_id), timeout=timeout)
             except asyncio.TimeoutError as exc:
                 await self._cleanup_failed_open(handle)
@@ -153,6 +152,18 @@ class RealtimeSessionManager:
                     "state": handle.state,
                     "upstreamMode": self.settings.upstream_mode,
                     "upstreamClient": type(handle.upstream).__name__,
+                },
+            )
+            # Send welcome text as subtitle so greeting shows captions
+            greeting_reply_id = f"greeting-{handle.session_id}"
+            handle.assistant_reply_id = greeting_reply_id
+            handle.assistant_text_buffer = handle.config.welcome_text
+            await self._send_json(
+                handle,
+                {
+                    "type": "assistant_text",
+                    "text": handle.config.welcome_text,
+                    "replyId": greeting_reply_id,
                 },
             )
             return handle
@@ -188,10 +199,6 @@ class RealtimeSessionManager:
     async def heartbeat(self, handle: SessionHandle) -> None:
         if handle.closed:
             return
-        if handle.config.auto_end_mode != "silence_timeout":
-            return
-        if time.monotonic() - handle.last_activity_at > handle.config.idle_timeout_sec:
-            await self.close_session(handle, "idle_timeout")
 
     async def detach(self, handle: SessionHandle, websocket: WebSocket) -> None:
         async with self._lock:
