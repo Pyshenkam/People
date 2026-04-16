@@ -58,7 +58,25 @@ if (-not $SkipBackend) {
     Write-Host ""
     Write-Host "[4/5] Building backend..." -ForegroundColor Yellow
     Push-Location "$ProjectRoot\backend"
-    .venv\Scripts\python -m PyInstaller backend.spec --noconfirm
+    .venv\Scripts\python -m pip install -r requirements.txt
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Install backend requirements failed!" -ForegroundColor Red
+        Pop-Location
+        exit 1
+    }
+    .venv\Scripts\python -m pip install pyinstaller
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Install PyInstaller failed!" -ForegroundColor Red
+        Pop-Location
+        exit 1
+    }
+    .venv\Scripts\python -c "import pymysql"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "pymysql import check failed in build venv!" -ForegroundColor Red
+        Pop-Location
+        exit 1
+    }
+    .venv\Scripts\python -m PyInstaller backend.spec --noconfirm --clean
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Backend build failed!" -ForegroundColor Red
         Pop-Location

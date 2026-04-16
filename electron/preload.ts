@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("backend-error", (_, message) => callback(message));
   },
 
+  // 音频诊断
+  diagnoseAudio: () => ipcRenderer.invoke("diagnose-audio"),
+
   // 日志
   log: (level: string, message: string) => {
     ipcRenderer.send("log", { level, message });

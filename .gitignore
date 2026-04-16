@@ -28,6 +28,11 @@ output/
 frontend/vite.config.js
 frontend/vite.config.d.ts
 
+backend/build/
+backend/dist/
+electron/dist/
+electron/release_*/
+
 .idea/
 .vscode/
 .env.local

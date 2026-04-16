@@ -31,6 +31,16 @@ if errorlevel 1 (
 echo.
 echo [3/4] Building backend...
 cd /d "%~dp0..\backend"
+call .venv\Scripts\python -m pip install -r requirements.txt
+if errorlevel 1 (
+    echo Install backend requirements failed!
+    exit /b 1
+)
+call .venv\Scripts\python -m pip install pyinstaller
+if errorlevel 1 (
+    echo Install PyInstaller failed!
+    exit /b 1
+)
 call .venv\Scripts\python -m PyInstaller backend.spec --noconfirm
 if errorlevel 1 (
     echo Backend build failed!

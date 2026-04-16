@@ -1,4 +1,5 @@
 import { spawn, ChildProcess } from "child_process";
+import * as crypto from "crypto";
 import * as path from "path";
 import * as fs from "fs";
 import * as http from "http";
@@ -49,6 +50,25 @@ export class PythonLauncher {
   private lastHealthCheck = 0;
   private consecutiveFailures = 0;
 
+  private terminateProcess(proc: ChildProcess): void {
+    if (process.platform === "win32") {
+      proc.kill();
+      return;
+    }
+    proc.kill("SIGTERM");
+  }
+
+  private forceKillProcess(proc: ChildProcess): void {
+    if (process.platform === "win32" && proc.pid) {
+      spawn("taskkill", ["/PID", String(proc.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      return;
+    }
+    proc.kill("SIGKILL");
+  }
+
   constructor(config: LauncherConfig, events: LauncherEvents) {
     this.config = { ...DEFAULT_CONFIG, ...config } as Required<LauncherConfig>;
     this.events = events;
@@ -94,6 +114,31 @@ export class PythonLauncher {
       fs.mkdirSync(logDir, { recursive: true });
     }
 
+    // 种子数据库：seed 内容变化或首次安装时，从打包的种子覆盖用户数据库
+    if (app.isPackaged) {
+      const userDb = path.join(dataDir, "museum.db");
+      const seedDb = path.join(process.resourcesPath, "seed", "museum.db");
+      const hashFile = path.join(dataDir, ".seed_hash");
+
+      if (fs.existsSync(seedDb)) {
+        const seedHash = crypto
+          .createHash("md5")
+          .update(fs.readFileSync(seedDb))
+          .digest("hex");
+        const installedHash = fs.existsSync(hashFile)
+          ? fs.readFileSync(hashFile, "utf-8").trim()
+          : "";
+
+        if (seedHash !== installedHash) {
+          console.log(
+            `[PythonLauncher] Seed changed (${installedHash || "none"} -> ${seedHash}), re-seeding database`
+          );
+          fs.copyFileSync(seedDb, userDb);
+          fs.writeFileSync(hashFile, seedHash, "utf-8");
+        }
+      }
+    }
+
     // 启动子进程
     this.process = spawn(exePath, [], {
       env,
@@ -122,23 +167,36 @@ export class PythonLauncher {
     this.isShuttingDown = true;
     this.stopHealthCheck();
     this.clearStartupTimeout();
+    this.isReady = false;
 
     const proc = this.process;
-    this.process = null;
 
     return new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
+      const settled = () => {
+        clearTimeout(graceTimeout);
+        clearTimeout(absoluteTimeout);
+        if (this.process === proc) {
+          this.process = null;
+        }
+        resolve();
+      };
+
+      // 5s 后强杀进程树
+      const graceTimeout = setTimeout(() => {
         console.log("[PythonLauncher] Force killing process");
-        proc.kill("SIGKILL");
+        this.forceKillProcess(proc);
       }, 5000);
 
-      proc.on("exit", () => {
-        clearTimeout(timeout);
-        resolve();
-      });
+      // 8s 绝对兜底：即使 exit 事件未触发也必须放行
+      const absoluteTimeout = setTimeout(() => {
+        console.error("[PythonLauncher] Absolute stop timeout, giving up");
+        settled();
+      }, 8000);
+
+      proc.once("exit", settled);
 
       // 先尝试优雅关闭
-      proc.kill("SIGTERM");
+      this.terminateProcess(proc);
     });
   }
 
@@ -289,7 +347,7 @@ export class PythonLauncher {
       // 连续多次失败，可能进程已死
       if (this.consecutiveFailures >= 3 && this.process) {
         console.error("[PythonLauncher] Backend unresponsive, killing process");
-        this.process.kill("SIGKILL");
+        this.forceKillProcess(this.process);
       }
     });
 

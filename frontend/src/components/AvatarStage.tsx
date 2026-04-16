@@ -1,6 +1,4 @@
 import {
-  Cloud,
-  ContactShadows,
   Environment,
   Lightformer,
   MeshReflectorMaterial,
@@ -10,7 +8,7 @@ import {
   useGLTF,
 } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Bloom, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
+import { EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import { memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
@@ -701,7 +699,7 @@ const StaticCosmosBackdrop = memo(function StaticCosmosBackdrop({
       <ParallaxStarLayer
         center={[0.12, 0.2, 0.42]}
         span={[28, 14.8, 3.8]}
-        count={3000}
+        count={800}
         color="#95a8c7"
         size={0.022}
         opacity={0.16}
@@ -709,19 +707,9 @@ const StaticCosmosBackdrop = memo(function StaticCosmosBackdrop({
         twinkle={0.08}
       />
       <ParallaxStarLayer
-        center={[0.32, 0.06, 1.08]}
-        span={[24.6, 12.8, 2.7]}
-        count={1700}
-        color="#c2d5ee"
-        size={0.028}
-        opacity={0.22}
-        drift={0.03}
-        twinkle={0.12}
-      />
-      <ParallaxStarLayer
         center={[-0.46, 0.96, 1.46]}
         span={[25.8, 3.9, 1.9]}
-        count={1250}
+        count={300}
         color="#dbe9ff"
         size={0.032}
         opacity={0.3}
@@ -732,7 +720,7 @@ const StaticCosmosBackdrop = memo(function StaticCosmosBackdrop({
       <ParallaxStarLayer
         center={[0.92, 0.28, 2.12]}
         span={[20.8, 2.7, 1.1]}
-        count={460}
+        count={120}
         color="#f4f9ff"
         size={0.062}
         opacity={0.46}
@@ -743,7 +731,7 @@ const StaticCosmosBackdrop = memo(function StaticCosmosBackdrop({
       <ParallaxStarLayer
         center={[1.82, -0.18, 2.96]}
         span={[17.4, 2.1, 0.82]}
-        count={128}
+        count={40}
         color="#fff6de"
         size={0.106}
         opacity={0.68}
@@ -751,80 +739,15 @@ const StaticCosmosBackdrop = memo(function StaticCosmosBackdrop({
         twinkle={0.34}
         rotationZ={-0.2}
       />
-      <ParallaxStarLayer
-        center={[-1.1, 2.52, 1.84]}
-        span={[21.2, 3.6, 1.4]}
-        count={420}
-        color={stageGlassAccent}
-        size={0.034}
-        opacity={0.18}
-        drift={0.048}
-        twinkle={0.16}
-      />
-      <ParallaxStarLayer
-        center={[1.42, -2.46, 2.46]}
-        span={[20.8, 3.3, 1.5]}
-        count={340}
-        color="#c0d2eb"
-        size={0.034}
-        opacity={0.16}
-        drift={0.038}
-        twinkle={0.12}
-      />
       <NebulaGlow position={[-7, 2.72, 3.42]} scale={[0.34, 0.34, 1]} color="#fff0d9" opacity={0.9} />
       <NebulaGlow position={[-3.2, 1.72, 3.56]} scale={[0.4, 0.4, 1]} color="#8fe7ff" opacity={0.86} />
       <NebulaGlow position={[1.3, 0.72, 3.7]} scale={[0.44, 0.44, 1]} color="#ffffff" opacity={0.9} />
       <NebulaGlow position={[5.8, -0.68, 3.62]} scale={[0.38, 0.38, 1]} color="#fff7e8" opacity={0.84} />
       <NebulaGlow position={[8.2, 2.12, 3.36]} scale={[0.28, 0.28, 1]} color="#8ecfff" opacity={0.8} />
-      <Stars radius={84} depth={24} count={4200} factor={1.72} saturation={0} fade speed={0.12} />
+      <Stars radius={84} depth={24} count={2000} factor={1.72} saturation={0} fade speed={0.12} />
       <Sparkles count={12} scale={[19.2, 10.2, 10.4]} size={1.48} speed={0.04} color="#dceeff" />
       <Sparkles count={6} scale={[16.8, 8.2, 8.2]} size={2.02} speed={0.03} color={stageGlassAccent} />
 
-      <Cloud
-        position={[-4.2, 1.82, 1.76]}
-        scale={[4.6, 0.9, 1]}
-        bounds={[5.2, 0.78, 2]}
-        segments={26}
-        opacity={0.14}
-        speed={0.04}
-        color="#29446d"
-      />
-      <Cloud
-        position={[-0.12, 0.82, 2.18]}
-        scale={[5.4, 1, 1]}
-        bounds={[6.2, 0.86, 2]}
-        segments={24}
-        opacity={0.16}
-        speed={0.03}
-        color="#4a73ae"
-      />
-      <Cloud
-        position={[3.6, -0.08, 2.72]}
-        scale={[4.2, 0.92, 1]}
-        bounds={[4.8, 0.74, 2]}
-        segments={24}
-        opacity={0.13}
-        speed={0.03}
-        color="#7cbcf0"
-      />
-      <Cloud
-        position={[6.8, -1.24, 3.04]}
-        scale={[3.4, 0.84, 1]}
-        bounds={[4, 0.66, 2]}
-        segments={20}
-        opacity={0.1}
-        speed={0.025}
-        color="#d8efff"
-      />
-      <Cloud
-        position={[-1.2, -2.38, 3.28]}
-        scale={[5.2, 1.16, 1]}
-        bounds={[6, 0.9, 2]}
-        segments={20}
-        opacity={0.08}
-        speed={0.03}
-        color="#101b34"
-      />
     </group>
   );
 });
@@ -1023,7 +946,7 @@ const ReactiveStageLayer = memo(function ReactiveStageLayer({
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, floorY, -0.02]} receiveShadow>
         <circleGeometry args={[3.12, 72]} />
         <MeshReflectorMaterial
-          resolution={512}
+          resolution={256}
           blur={[420, 90]}
           mixBlur={0.9}
           mixStrength={1.6}
@@ -1054,7 +977,6 @@ const ReactiveStageLayer = memo(function ReactiveStageLayer({
 const ScenePostFx = memo(function ScenePostFx() {
   return (
     <EffectComposer>
-      <Bloom mipmapBlur intensity={0.68} luminanceThreshold={0.18} luminanceSmoothing={0.46} />
       <Noise opacity={0.018} />
       <Vignette eskil={false} offset={0.18} darkness={0.84} />
     </EffectComposer>
@@ -1149,13 +1071,13 @@ export const AvatarStage = memo(function AvatarStage({
 
   return (
     <div className="avatar-stage">
-      <Canvas camera={{ position: preset.cameraPosition, fov: preset.cameraFov }} shadows dpr={[1, 2]}>
+      <Canvas camera={{ position: preset.cameraPosition, fov: preset.cameraFov }} dpr={1}>
         <color attach="background" args={["#01040c"]} />
         <fog attach="fog" args={["#01040c", 15.4, 36]} />
         <CameraRig target={preset.cameraTarget} />
         <ambientLight intensity={0.38} />
         <hemisphereLight intensity={0.5} groundColor="#010409" color="#b4e3ff" />
-        <directionalLight position={[0.3, 3.8, 3.5]} intensity={1.6} castShadow color="#eef6ff" />
+        <directionalLight position={[0.3, 3.8, 3.5]} intensity={1.6} color="#eef6ff" />
         <spotLight position={[0, 4.8, 2.2]} intensity={18} angle={0.33} penumbra={0.92} color="#f1f8ff" />
         <Suspense fallback={null}>
           <StaticStageEnvironment />
@@ -1163,13 +1085,6 @@ export const AvatarStage = memo(function AvatarStage({
         <StaticCosmosBackdrop cameraPosition={preset.cameraPosition} cameraTarget={preset.cameraTarget} />
         <ReactiveStageLayer floorY={preset.floorY} mode={stageVisualMode} />
         <AvatarActor avatarUrl={avatarUrl} level={level} phase={phase} preset={preset} />
-        <ContactShadows
-          position={[0, preset.floorY + 0.02, 0.05]}
-          opacity={preset.shadowOpacity}
-          scale={preset.shadowScale}
-          blur={2.1}
-          far={3.4}
-        />
         <ScenePostFx />
       </Canvas>
     </div>

@@ -20,7 +20,7 @@ const activePhases = new Set<VisitorPhase>([
 
 const ADMIN_TAP_COUNT = 10;
 const ADMIN_TAP_WINDOW_MS = 3000;
-const COUNTDOWN_SECONDS = 5;
+const COUNTDOWN_SECONDS = 10;
 
 export function VisitorPage() {
   const navigate = useNavigate();
@@ -56,6 +56,10 @@ export function VisitorPage() {
   const [countdown, setCountdown] = useState<number | null>(null);
   const idleTimerRef = useRef<number | null>(null);
   const countdownTimerRef = useRef<number | null>(null);
+  const endConversationRef = useRef(endConversation);
+  endConversationRef.current = endConversation;
+  const activeConfigRef = useRef(activeConfig);
+  activeConfigRef.current = activeConfig;
 
   const clearAllIdleTimers = useCallback(() => {
     if (idleTimerRef.current !== null) {
@@ -71,24 +75,32 @@ export function VisitorPage() {
 
   const resetIdleTimer = useCallback(() => {
     clearAllIdleTimers();
-    const timeoutSec = activeConfig?.idle_timeout_sec ?? 60;
-    const autoEnd = activeConfig?.auto_end_mode ?? "screen_idle";
-    if (autoEnd !== "screen_idle" || timeoutSec <= COUNTDOWN_SECONDS) return;
+    const cfg = activeConfigRef.current;
+    const timeoutSec = cfg?.idle_timeout_sec ?? 60;
+    const autoEnd = cfg?.auto_end_mode ?? "screen_idle";
+    console.log("[IdleTimer] reset", { timeoutSec, autoEnd, hasConfig: !!cfg });
+    if (autoEnd !== "screen_idle" || timeoutSec <= COUNTDOWN_SECONDS) {
+      console.warn("[IdleTimer] skipped:", { autoEnd, timeoutSec, COUNTDOWN_SECONDS });
+      return;
+    }
 
+    const delaySec = timeoutSec - COUNTDOWN_SECONDS;
+    console.log("[IdleTimer] armed, countdown starts in", delaySec, "s");
     idleTimerRef.current = window.setTimeout(() => {
+      console.log("[IdleTimer] countdown started");
       let remaining = COUNTDOWN_SECONDS;
       setCountdown(remaining);
       countdownTimerRef.current = window.setInterval(() => {
         remaining -= 1;
         if (remaining <= 0) {
           clearAllIdleTimers();
-          void endConversation();
+          void endConversationRef.current();
         } else {
           setCountdown(remaining);
         }
       }, 1000);
-    }, (timeoutSec - COUNTDOWN_SECONDS) * 1000);
-  }, [activeConfig, clearAllIdleTimers, endConversation]);
+    }, delaySec * 1000);
+  }, [clearAllIdleTimers]);
 
   const loadLatestConfig = async (): Promise<PublicConfigResponse> => {
     const result = await fetchPublicConfig();
@@ -133,7 +145,7 @@ export function VisitorPage() {
       return;
     }
     resetIdleTimer();
-    const events = ["pointerdown", "pointermove", "keydown"] as const;
+    const events = ["pointerdown", "touchstart", "keydown"] as const;
     const onInteraction = () => resetIdleTimer();
     for (const evt of events) {
       window.addEventListener(evt, onInteraction, { passive: true });
@@ -217,7 +229,46 @@ export function VisitorPage() {
 
           {error ? (
             <div className="visitor-overlay__error">
-              <Alert type="error" showIcon message={error} />
+              <Alert
+                type="error"
+                showIcon
+                message="音频问题"
+                description={
+                  <div style={{ whiteSpace: "pre-line" }}>
+                    {error}
+                    {typeof window !== "undefined" && "electronAPI" in window ? (
+                      <button
+                        type="button"
+                        style={{
+                          display: "block",
+                          marginTop: 12,
+                          padding: "6px 16px",
+                          borderRadius: 6,
+                          border: "1px solid rgba(255,255,255,0.3)",
+                          background: "rgba(255,255,255,0.1)",
+                          color: "#fff",
+                          cursor: "pointer",
+                          fontSize: 14,
+                        }}
+                        onClick={async () => {
+                          const api = (window as unknown as { electronAPI?: { diagnoseAudio?: () => Promise<unknown> } }).electronAPI;
+                          if (api?.diagnoseAudio) {
+                            try {
+                              const result = await api.diagnoseAudio();
+                              console.info("[audio-diagnose]", result);
+                              alert("诊断信息已输出到控制台(F12)，请查看。\n\n" + JSON.stringify(result, null, 2));
+                            } catch {
+                              alert("诊断失败，请查看控制台日志。");
+                            }
+                          }
+                        }}
+                      >
+                        运行音频诊断
+                      </button>
+                    ) : null}
+                  </div>
+                }
+              />
             </div>
           ) : null}
 

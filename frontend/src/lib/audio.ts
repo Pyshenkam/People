@@ -25,6 +25,129 @@ export interface AudioRuntimeOptions {
   playbackTone?: "natural" | "panda_warm";
 }
 
+export interface AudioDeviceStatus {
+  hasMicrophone: boolean;
+  hasSpeaker: boolean;
+  microphoneLabel: string;
+  speakerLabel: string;
+  inputDeviceCount: number;
+  outputDeviceCount: number;
+}
+
+export class AudioInitError extends Error {
+  public readonly code: string;
+  public readonly hint: string;
+
+  constructor(code: string, message: string, hint: string) {
+    super(message);
+    this.name = "AudioInitError";
+    this.code = code;
+    this.hint = hint;
+  }
+}
+
+const AUDIO_ERROR_HINTS: Record<string, { message: string; hint: string }> = {
+ NotAllowedError: {
+    message: "麦克风权限被拒绝",
+    hint: "请在 Windows 设置 → 隐私 → 麦克风 中允许应用访问麦克风，并确保该应用的麦克风权限已开启。",
+  },
+ NotFoundError: {
+    message: "未检测到麦克风设备",
+    hint: "请检查麦克风是否已连接，或设备驱动是否已安装。一体机可能需要外接麦克风。",
+  },
+  NotReadableError: {
+    message: "麦克风无法读取",
+    hint: "麦克风可能被其他程序占用或驱动异常。请关闭其他可能使用麦克风的应用后重试。",
+  },
+  OverconstrainedError: {
+    message: "麦克风不支持所需配置",
+    hint: "当前麦克风不支持所需的音频约束，请尝试其他麦克风设备或检查驱动程序。",
+  },
+  AbortError: {
+    message: "音频初始化被中断",
+    hint: "音频初始化过程被中断，请重试。如果问题持续，请检查音频服务是否正常。",
+  },
+  NotSupportedError: {
+    message: "浏览器不支持音频功能",
+    hint: "当前环境不支持所需的音频 API，请联系管理员。",
+  },
+  SecurityError: {
+    message: "安全策略阻止了音频访问",
+    hint: "安全策略阻止了麦克风访问，请检查应用的安全设置。",
+  },
+};
+
+export function classifyAudioError(error: unknown): AudioInitError {
+  if (error instanceof AudioInitError) {
+    return error;
+  }
+  const err = error instanceof Error ? error : new Error(String(error));
+  const errorName = err.name;
+  const mapping = AUDIO_ERROR_HINTS[errorName];
+  if (mapping) {
+    return new AudioInitError(errorName, mapping.message, mapping.hint);
+  }
+  return new AudioInitError("UnknownError", `音频初始化失败: ${err.message}`, "请检查音频设备连接和系统设置，或联系管理员。");
+}
+
+export async function checkAudioDevices(): Promise<AudioDeviceStatus> {
+  let inputDeviceCount = 0;
+  let outputDeviceCount = 0;
+  let microphoneLabel = "";
+  let speakerLabel = "";
+
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    for (const device of devices) {
+      if (device.kind === "audioinput") {
+        inputDeviceCount += 1;
+        if (!microphoneLabel && device.label) {
+          microphoneLabel = device.label;
+        }
+      } else if (device.kind === "audiooutput") {
+        outputDeviceCount += 1;
+        if (!speakerLabel && device.label) {
+          speakerLabel = device.label;
+        }
+      }
+    }
+  } catch {
+    // enumerateDevices 不可用时降级，不阻止后续流程
+  }
+
+  const status = {
+    hasMicrophone: inputDeviceCount > 0,
+    hasSpeaker: outputDeviceCount > 0,
+    microphoneLabel,
+    speakerLabel,
+    inputDeviceCount,
+    outputDeviceCount,
+  };
+
+  // 写日志到文件
+  fileLog("info", `设备检测: 输入=${inputDeviceCount}, 输出=${outputDeviceCount}, 麦克风=${microphoneLabel || "无"}, 扬声器=${speakerLabel || "无"}`);
+  if (!status.hasMicrophone) {
+    fileLog("error", "未检测到麦克风设备!");
+  }
+  if (!status.hasSpeaker) {
+    fileLog("warn", "未检测到扬声器设备，TTS 可能无法播放");
+  }
+
+  return status;
+}
+
+/**
+ * 写日志到 Electron 主进程日志文件
+ */
+function fileLog(level: string, message: string): void {
+  try {
+    const api = (window as unknown as { electronAPI?: { log?: (level: string, message: string) => void } }).electronAPI;
+    api?.log?.(level, `[audio] ${message}`);
+  } catch {
+    // 非 Electron 环境忽略
+  }
+}
+
 function normalizePlaybackTone(
   playbackTone: AudioRuntimeOptions["playbackTone"],
 ): "panda_warm" {
@@ -193,18 +316,112 @@ export async function createAudioRuntime(
   callbacks: CaptureCallbacks,
   options: AudioRuntimeOptions = {},
 ): Promise<AudioRuntime> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      channelCount: 1,
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    },
-    video: false,
-  });
+  fileLog("info", "开始创建音频运行时");
 
-  const context = new AudioContext();
-  await context.audioWorklet.addModule("/audio/capture-worklet.js");
+  // 预检音频设备
+  const deviceStatus = await checkAudioDevices();
+  console.info("[audio] Device status:", deviceStatus);
+
+  if (!deviceStatus.hasMicrophone) {
+    fileLog("error", "预检失败: 无麦克风设备，中止创建");
+    throw new AudioInitError(
+      "NoMicrophone",
+      "未检测到麦克风设备",
+      "请检查麦克风是否已连接或驱动是否已安装。一体机可能没有内置麦克风，需要外接麦克风。",
+    );
+  }
+
+  if (!deviceStatus.hasSpeaker) {
+    fileLog("warn", "预检警告: 无扬声器设备，TTS 可能无法播放声音");
+  }
+
+  let stream: MediaStream;
+  try {
+    fileLog("info", "请求 getUserMedia (带约束: channelCount=1, echoCancellation=true, noiseSuppression=true, autoGainControl=true)");
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    });
+    fileLog("info", "getUserMedia 成功 (带约束)");
+  } catch (firstError) {
+    fileLog("warn", `getUserMedia 带约束失败: ${firstError instanceof Error ? `${firstError.name}: ${firstError.message}` : String(firstError)}`);
+    // 带约束的 getUserMedia 失败，可能是其他程序独占了带回声消除的麦克风通道
+    // 降级：用最简约束（仅请求音频，不指定任何高级参数）重试
+    console.warn("[audio] getUserMedia with constraints failed, retrying with minimal constraints:", firstError);
+    try {
+      fileLog("info", "降级重试: getUserMedia (audio: true)");
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+      fileLog("info", "getUserMedia 降级成功");
+      console.info("[audio] getUserMedia succeeded with minimal constraints (fallback)");
+    } catch (fallbackError) {
+      fileLog("error", `getUserMedia 降级也失败: ${fallbackError instanceof Error ? `${fallbackError.name}: ${fallbackError.message}` : String(fallbackError)}`);
+      // 两次都失败，用第一次的错误分类（更有参考价值）
+      throw classifyAudioError(firstError);
+    }
+  }
+
+  // 检查 stream 的音频轨道是否真的有数据
+  const audioTracks = stream.getAudioTracks();
+  if (audioTracks.length === 0) {
+    stream.getTracks().forEach((t) => t.stop());
+    fileLog("error", "获取到的流没有音频轨道");
+    throw new AudioInitError(
+      "NoAudioTrack",
+      "获取到的音频流没有音频轨道",
+      "麦克风设备存在但无法创建音频轨道，请检查驱动程序或尝试其他麦克风。",
+    );
+  }
+
+  const trackInfo = audioTracks.map((t) => ({
+    label: t.label,
+    enabled: t.enabled,
+    muted: t.muted,
+    readyState: t.readyState,
+    settings: t.getSettings?.(),
+  }));
+  console.info("[audio] Got audio tracks:", trackInfo);
+  fileLog("info", `音频轨道: ${JSON.stringify(trackInfo)}`);
+  if (audioTracks.some((t) => t.muted)) {
+    fileLog("warn", "音频轨道处于静音(muted)状态，可能麦克风被系统禁用");
+  }
+
+  let context: AudioContext;
+  try {
+    context = new AudioContext();
+  } catch (error) {
+    stream.getTracks().forEach((t) => t.stop());
+    fileLog("error", `AudioContext 创建失败: ${error instanceof Error ? error.message : String(error)}`);
+    throw classifyAudioError(error);
+  }
+
+  // 检查 AudioContext 状态
+  fileLog("info", `AudioContext 创建成功: state=${context.state}, sampleRate=${context.sampleRate}`);
+  if (context.state === "suspended") {
+    console.warn("[audio] AudioContext created in suspended state, will need resume()");
+    fileLog("warn", "AudioContext 处于 suspended 状态，需要用户交互后 resume()");
+  }
+
+  try {
+    await context.audioWorklet.addModule("/audio/capture-worklet.js");
+    fileLog("info", "AudioWorklet 加载成功");
+  } catch (error) {
+    stream.getTracks().forEach((t) => t.stop());
+    await context.close().catch(() => {});
+    fileLog("error", `AudioWorklet 加载失败: ${error instanceof Error ? error.message : String(error)}`);
+    throw new AudioInitError(
+      "WorkletLoadFailed",
+      "音频处理模块加载失败",
+      `Audio worklet 加载失败: ${error instanceof Error ? error.message : String(error)}。请检查应用安装是否完整。`,
+    );
+  }
 
   const source = context.createMediaStreamSource(stream);
   const captureNode = new AudioWorkletNode(context, "capture-processor");

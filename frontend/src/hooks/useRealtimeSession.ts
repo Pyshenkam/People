@@ -1,6 +1,18 @@
 import { startTransition, useEffect, useEffectEvent, useReducer, useRef, useState } from "react";
-import { computeLevel, createAudioRuntime, type AudioRuntime, type PlaybackEvent } from "../lib/audio";
+import { computeLevel, createAudioRuntime, type AudioInitError, type AudioRuntime, type PlaybackEvent } from "../lib/audio";
 import type { MuseumConfig, VisitorPhase } from "../types/api";
+
+/**
+ * 写日志到 Electron 主进程日志文件
+ */
+function audioFileLog(level: string, message: string): void {
+  try {
+    const api = (window as unknown as { electronAPI?: { log?: (level: string, message: string) => void } }).electronAPI;
+    api?.log?.(level, `[session] ${message}`);
+  } catch {
+    // 非 Electron 环境忽略
+  }
+}
 
 interface SessionViewState {
   phase: VisitorPhase;
@@ -262,6 +274,7 @@ export function useRealtimeSession(config: MuseumConfig | null) {
     }
 
     pushTrace("start:click");
+    audioFileLog("info", "用户点击开始对话");
     setActiveConfig(effectiveConfig);
     dispatch({ type: "phase", phase: "opening_session" });
     dispatch({ type: "assistant", text: "", replyId: null });
@@ -335,6 +348,7 @@ export function useRealtimeSession(config: MuseumConfig | null) {
       audioRef.current = audioRuntime;
       await audioRuntime.context.resume();
       pushTrace("media:get_user_media_ok", { sampleRate: audioRuntime.context.sampleRate });
+      audioFileLog("info", `AudioContext resume 成功, state=${audioRuntime.context.state}, sampleRate=${audioRuntime.context.sampleRate}`);
 
       const socket = new WebSocket(getWsUrl());
       socket.binaryType = "arraybuffer";
@@ -501,8 +515,17 @@ export function useRealtimeSession(config: MuseumConfig | null) {
         void releaseResources("error", "实时连接失败，请检查网络或上游配置。");
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "启动实时会话失败。";
-      pushTrace("start:failed", { message });
+      let message: string;
+      if (error && typeof error === "object" && "hint" in error) {
+        // AudioInitError with hint
+        const audioErr = error as AudioInitError;
+        message = `${audioErr.message}\n\n排查建议：${audioErr.hint}`;
+        audioFileLog("error", `音频初始化失败 [${audioErr.code}]: ${audioErr.message} | 排查: ${audioErr.hint}`);
+      } else {
+        message = error instanceof Error ? error.message : "启动实时会话失败。";
+        audioFileLog("error", `会话启动失败: ${message}`);
+      }
+      pushTrace("start:failed", { message, code: (error as AudioInitError)?.code });
       await releaseResources("error", message);
     }
   });

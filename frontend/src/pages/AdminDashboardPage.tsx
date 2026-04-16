@@ -467,14 +467,8 @@ export function AdminDashboardPage() {
                       }
                     />
                   </Form.Item>
-                  <Form.Item label="WebSocket 地址" name="base_url" rules={[buildTrimmedRequiredRule("")]}>
-                    <Input placeholder={DEFAULT_UPSTREAM_BASE_URL} />
-                  </Form.Item>
-                  <Form.Item label="Resource ID" name="resource_id" rules={[buildTrimmedRequiredRule("")]}>
-                    <Input placeholder={DEFAULT_UPSTREAM_RESOURCE_ID} />
-                  </Form.Item>
-                  <Form.Item label="App Key" name="app_key" rules={[buildTrimmedRequiredRule("")]}>
-                    <Input placeholder={DEFAULT_UPSTREAM_APP_KEY} />
+                  <Form.Item label="App Key" rules={[buildTrimmedRequiredRule("App Key 不能为空。")]}>
+                    <Input disabled placeholder="固定值，无需修改" value={DEFAULT_UPSTREAM_APP_KEY} />
                   </Form.Item>
                 </div>
               </section>

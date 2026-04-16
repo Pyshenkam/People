@@ -14,6 +14,8 @@ extraResources:
     to: backend.exe
   - from: ../frontend/dist
     to: frontend/dist
+  - from: ../data/museum.db
+    to: seed/museum.db
 
 win:
   target: [{ target: nsis, arch: [x64] }]
